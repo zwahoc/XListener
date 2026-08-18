@@ -1,0 +1,26 @@
+from pathlib import Path
+
+from xlistener.config import load_settings
+
+
+def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+
+    assert settings.account.handle == "thsottiaux"
+    assert settings.account.profile_url == "https://x.com/thsottiaux"
+    assert settings.fetcher.headless is True
+    assert settings.llm.model == "qwen3:4b"
+
+
+def test_environment_handle_overrides_yaml_account(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "account:\n  handle: yaml_account\n  profile_url: https://x.com/yaml_account\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("X_MONITORED_HANDLE", "@env_account")
+
+    settings = load_settings(config_path=config_path)
+
+    assert settings.account.handle == "env_account"
+    assert settings.account.profile_url == "https://x.com/env_account"

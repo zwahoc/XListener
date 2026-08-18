@@ -1,0 +1,14 @@
+# Keep repository text files identical across Windows, macOS, and Linux.
+* text=auto eol=lf
+
+# Preserve binary assets exactly.
+*.gif binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.mp3 binary
+*.mp4 binary
+*.pdf binary
+*.png binary
+*.webm binary
+*.webp binary

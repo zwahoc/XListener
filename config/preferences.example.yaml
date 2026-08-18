@@ -1,0 +1,25 @@
+interests:
+  - topic: Codex resets, limits, and usage changes
+    priority: high
+    description: >-
+      Notify me about Codex reset behavior, usage limits, quotas, reset timing,
+      allowance changes, session limits, and changes affecting when Codex can be used.
+  - topic: Codex updates and releases
+    priority: high
+    description: >-
+      Notify me about new Codex releases, product updates, version changes,
+      availability changes, important fixes, breaking changes, and substantive announcements.
+  - topic: Codex and ChatGPT capabilities
+    priority: high
+    description: >-
+      Notify me about meaningful new Codex or ChatGPT capabilities, especially coding-agent
+      behavior, developer tooling, integrations, model behavior, and useful workflows.
+
+ignore:
+  - Memes, jokes, and humorous posts without substantive product information
+  - Generic marketing or promotional posts
+  - Generic questions asking users for opinions or feedback
+  - Routine conversational replies and social commentary
+  - Reposts with no meaningful new information
+  - General company news unrelated to Codex or a meaningful capability change
+

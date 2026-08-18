@@ -1,0 +1,41 @@
+# Set X_MONITORED_HANDLE in .env to choose the account to monitor.
+# This optional YAML block is only a fallback when the environment variable is absent.
+account:
+  handle: thsottiaux
+  profile_url: https://x.com/thsottiaux
+
+fetcher:
+  type: playwright_x
+  interval_seconds: 45
+  jitter_ratio: 0.15
+  max_posts_per_poll: 20
+  bootstrap_mode: baseline
+  include_replies: true
+  include_reposts: true
+  headless: true
+
+llm:
+  model: qwen3:4b
+  vision_model: qwen3-vl:4b
+  base_url: http://localhost:11434
+  temperature: 0
+  keep_alive: "0"
+
+notification:
+  min_importance: 6
+  chat_id_env: TELEGRAM_CHAT_ID
+  parse_mode: HTML
+  feedback_enabled: true
+  telegram_update_poll_seconds: 2
+
+learning:
+  enabled: true
+  positive_rating_min: 6
+  processed_id_retention_days: 30
+  processed_id_max_rows: 2000
+  max_examples_in_prompt: 6
+
+runtime:
+  database_path: "%LOCALAPPDATA%/XListener/xlistener.sqlite3"
+  log_level: INFO
+  dry_run: false
