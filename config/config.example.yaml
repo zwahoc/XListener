@@ -6,8 +6,9 @@ account:
 
 fetcher:
   type: playwright_x
-  interval_seconds: 45
-  jitter_ratio: 0.15
+  browser_channel: chrome
+  poll_min_seconds: 10
+  poll_max_seconds: 90
   max_posts_per_poll: 20
   bootstrap_mode: baseline
   include_replies: true

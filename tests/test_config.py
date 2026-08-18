@@ -9,6 +9,9 @@ def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
     assert settings.account.handle == "thsottiaux"
     assert settings.account.profile_url == "https://x.com/thsottiaux"
     assert settings.fetcher.headless is True
+    assert settings.fetcher.browser_channel == "chrome"
+    assert settings.fetcher.poll_min_seconds == 10
+    assert settings.fetcher.poll_max_seconds == 90
     assert settings.llm.model == "qwen3:4b"
 
 

@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -64,15 +64,22 @@ class AccountConfig(BaseModel):
 
 class FetcherConfig(BaseModel):
     type: str = "playwright_x"
-    interval_seconds: int = Field(default=45, ge=5)
-    jitter_ratio: float = Field(default=0.15, ge=0, le=1)
+    browser_channel: str = "chrome"
+    poll_min_seconds: int = Field(default=10, ge=5)
+    poll_max_seconds: int = Field(default=90, ge=5)
     max_posts_per_poll: int = Field(default=20, ge=1, le=100)
     bootstrap_mode: str = "baseline"
     include_replies: bool = True
     include_reposts: bool = True
     headless: bool = True
     storage_state_path: Path = DEFAULT_RUNTIME_DIR / "secrets" / "x_storage.json"
-    browser_profile_path: Path = DEFAULT_RUNTIME_DIR / "browser"
+    browser_profile_path: Path = DEFAULT_RUNTIME_DIR / "browser" / "chrome-profile"
+
+    @model_validator(mode="after")
+    def validate_poll_range(self) -> "FetcherConfig":
+        if self.poll_max_seconds < self.poll_min_seconds:
+            raise ValueError("poll_max_seconds must be greater than or equal to poll_min_seconds")
+        return self
 
 
 class LlmConfig(BaseModel):

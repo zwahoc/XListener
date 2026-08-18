@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import time
 import logging
+import shutil
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -25,6 +30,42 @@ LOG = logging.getLogger(__name__)
 
 class XAuthenticationRequired(RuntimeError):
     """Raised when X requires interactive authentication."""
+
+
+def _find_chrome_executable() -> str | None:
+    """Find an installed Google Chrome executable for manual bootstrap."""
+
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        candidates.extend(
+            Path(path)
+            for path in (
+                os.environ.get("PROGRAMFILES", ""),
+                os.environ.get("PROGRAMFILES(X86)", ""),
+                os.environ.get("LOCALAPPDATA", ""),
+            )
+            if path
+        )
+        candidates = [base / "Google/Chrome/Application/chrome.exe" for base in candidates]
+    elif sys.platform == "darwin":
+        candidates.extend(
+            Path(path).expanduser()
+            for path in (
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            )
+        )
+    else:
+        candidates.extend(Path(path) for path in ("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    for command in ("google-chrome", "google-chrome-stable", "chrome"):
+        found = shutil.which(command)
+        if found:
+            return found
+    return None
 
 
 def _status_id(href: str | None) -> str | None:
@@ -301,12 +342,12 @@ class PlaywrightXFetcher:
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.settings.fetcher.headless)
-        storage = self.settings.fetcher.storage_state_path
-        if storage.exists():
-            self._context = await self._browser.new_context(storage_state=str(storage))
-        else:
-            self._context = await self._browser.new_context()
+        profile = self.settings.fetcher.browser_profile_path
+        self._context = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            channel=self.settings.fetcher.browser_channel,
+            headless=self.settings.fetcher.headless,
+        )
 
     async def close(self) -> None:
         if self._context:
@@ -320,20 +361,22 @@ class PlaywrightXFetcher:
         self._playwright = None
 
     async def authenticate(self, manual: bool = False) -> None:
-        credentials = ensure_x_credentials()
         await self.close()
-        if not self._playwright:
-            self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=False)
-        self._context = await self._browser.new_context()
-        page = await self._context.new_page()
-        await page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=45_000)
         if manual:
-            print("Complete the X login manually in the browser window. Waiting for authentication...")
-            await self._wait_for_login_completion(page, timeout_seconds=300)
-            await self._save_authenticated_state(page)
+            await self._bootstrap_manual_profile()
             return
 
+        credentials = ensure_x_credentials()
+        if not self._playwright:
+            self._playwright = await async_playwright().start()
+        profile = self.settings.fetcher.browser_profile_path
+        self._context = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            channel=self.settings.fetcher.browser_channel,
+            headless=False,
+        )
+        page = await self._context.new_page()
+        await page.goto("https://x.com/i/flow/login", wait_until="domcontentloaded", timeout=45_000)
         await page.wait_for_selector(
             "input[name='username_or_email'], input[autocomplete='username'], input[name='text']",
             timeout=30_000,
@@ -355,6 +398,39 @@ class PlaywrightXFetcher:
         await self._click_any_exact_text(page, ["Log in", "Sign in", "Continue"])
         print("X login submitted. Complete any challenge or MFA in the browser window if shown.")
         await self._wait_for_login_completion(page, timeout_seconds=180)
+        await self._save_authenticated_state(page)
+
+    async def _bootstrap_manual_profile(self) -> None:
+        chrome = _find_chrome_executable()
+        if not chrome:
+            raise XAuthenticationRequired("Google Chrome is not installed or could not be found")
+
+        profile = self.settings.fetcher.browser_profile_path
+        profile.mkdir(parents=True, exist_ok=True)
+        browser_process = subprocess.Popen(
+            [
+                chrome,
+                f"--user-data-dir={profile}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "https://x.com/i/flow/login",
+            ]
+        )
+        print(f"Opened ordinary Google Chrome with the dedicated XListener profile: {profile}")
+        print("Complete the X login, then close every window belonging to that profile.")
+        try:
+            await asyncio.wait_for(asyncio.to_thread(browser_process.wait), timeout=600)
+        except asyncio.TimeoutError:
+            browser_process.terminate()
+            raise XAuthenticationRequired("Timed out waiting for the dedicated Chrome profile to close") from None
+
+        self._playwright = await async_playwright().start()
+        self._context = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile),
+            channel=self.settings.fetcher.browser_channel,
+            headless=False,
+        )
+        page = self._context.pages[0] if self._context.pages else await self._context.new_page()
         await self._save_authenticated_state(page)
 
     async def _save_authenticated_state(self, page: Page) -> None:

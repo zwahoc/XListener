@@ -606,8 +606,8 @@ account:
 
 fetcher:
   type: playwright_x
-  interval_seconds: 45
-  jitter_ratio: 0.15
+  poll_min_seconds: 10
+  poll_max_seconds: 90
   max_posts_per_poll: 20
   bootstrap_mode: baseline
   storage_state_path: C:/Users/<user>/AppData/Local/XListener/secrets/x_storage.json
@@ -867,8 +867,13 @@ async def run_forever() -> None:
         except Exception:
             log.exception("poll failed")
 
-        await asyncio.sleep(next_interval(started))
+        await asyncio.sleep(random.uniform(
+            settings.fetcher.poll_min_seconds,
+            settings.fetcher.poll_max_seconds,
+        ))
 ```
+
+Choose a fresh delay independently after every completed or failed X poll. The default range is uniformly randomized from 10 through 90 seconds. Error-specific backoff and authentication cooldowns override this normal polling range when X is unavailable, rate-limited, or requires login attention.
 
 Important ordering decisions:
 

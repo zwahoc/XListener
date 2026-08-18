@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import httpx
+from playwright.async_api import async_playwright
 
 from .config import load_settings
 from .db import SQLiteState
@@ -30,10 +31,15 @@ def _parser() -> argparse.ArgumentParser:
 
 
 async def _check_browser(settings) -> str:
-    async with PlaywrightXFetcher(settings):
-        if settings.fetcher.storage_state_path.exists():
-            return "Playwright: browser launch and saved session state available"
-        return "Playwright: browser launch available; no saved X session yet"
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            channel=settings.fetcher.browser_channel,
+            headless=True,
+        )
+        await browser.close()
+    if settings.fetcher.storage_state_path.exists():
+        return "Playwright: installed Chrome launch and saved session marker available"
+    return "Playwright: installed Chrome launch available; no saved X session yet"
 
 
 async def _auth_x(settings, manual: bool) -> None:

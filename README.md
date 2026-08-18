@@ -26,6 +26,10 @@ TELEGRAM_CHAT_ID=your_chat_id
 
 `X_MONITORED_HANDLE` accepts an optional leading `@` and overrides the account in `config.yaml`. This makes the monitored account machine-local without changing tracked configuration files.
 
+XListener uses a dedicated persistent Google Chrome profile under the local runtime directory (`browser/chrome-profile`). Run `auth-x --manual` for the initial login. It opens ordinary Google Chrome without Playwright attached; complete the login and close that dedicated Chrome window so XListener can verify the session automatically. The same profile will be reused on later fetches. Do not point it at your everyday Chrome profile.
+
+Normal monitoring will choose a new random delay between 10 and 90 seconds after each X poll. Authentication failures and service errors use separate, longer cooldowns rather than this normal range.
+
 The image/video milestone dependencies can be installed with:
 
 ```powershell
@@ -53,4 +57,4 @@ Phase 1 and Phase 2 diagnostics:
 .\.venv\Scripts\python.exe -m xlistener fetch-once --limit 5
 ```
 
-`auth-x` opens a headed browser for the one-time login and session-state capture. `fetch-once` uses the saved state when available and falls back to public profile cards where X exposes them; replies may remain unavailable until authentication succeeds.
+`auth-x --manual` opens the dedicated installed-Chrome profile as an ordinary browser process for the one-time login, then verifies and captures the session after you close it. `fetch-once` reuses that persistent profile and falls back to public profile cards where X exposes them; replies may remain unavailable until authentication succeeds. Google Chrome must be installed for the manual bootstrap.
