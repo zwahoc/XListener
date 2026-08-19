@@ -59,6 +59,10 @@ Phase 1 and Phase 2 diagnostics:
 .\.venv\Scripts\python.exe -m xlistener notify-latest --dry-run
 .\.venv\Scripts\python.exe -m xlistener feedback-once
 .\.venv\Scripts\python.exe -m xlistener feedback-listen
+.\.venv\Scripts\python.exe -m xlistener run-once
+.\.venv\Scripts\python.exe -m xlistener run
+.\.venv\Scripts\python.exe -m xlistener supervise
+.\.venv\Scripts\python.exe -m xlistener gaming-status
 ```
 
 `auth-x --manual` opens the dedicated installed-Chrome profile as an ordinary browser process for the one-time login, then verifies and captures the session after you close it. `fetch-once` reuses that persistent profile and falls back to public profile cards where X exposes them; replies may remain unavailable until authentication succeeds. Google Chrome must be installed for the manual bootstrap.
@@ -74,3 +78,18 @@ Feedback is recomputed into a learned tag-affinity profile and bounded rated exa
 To recover a missed post, send its `x.com` or `twitter.com` status link by itself to the bot. The bot validates the link and asks for a 1-10 usefulness rating before doing any X fetch or Ollama work. After the rating is selected, it fetches only that post and bounded relationship context, classifies and retains it as `user_submitted_missed`, updates learning, and sends an explicit success or failure message.
 
 Run `feedback-listen` while using ratings or missed-post recovery so Telegram updates are handled immediately. `feedback-once` remains available for diagnostics and consumes only the updates currently waiting at Telegram.
+
+`run-once` executes one complete polling cycle. On the first run with `bootstrap_mode: baseline`, it records the newest visible post as the cursor without processing historical content. `run` starts the continuous text daemon: it polls X at a random delay between the configured 10 and 90 seconds, processes posts oldest-first, runs context hydration and the two-pass classifier, sends qualifying notifications, and runs Telegram feedback/missed-post handling concurrently. It owns a runtime lock so a second daemon cannot compete for the Chrome profile or Telegram updates.
+
+Ignored posts are represented only by expiring ID checkpoints. A qualifying post is retained before notification. Classification or Telegram failures are retained as retryable work with exponential backoff; if classification already succeeded, notification retries reuse the saved analysis without another Ollama call. Runtime logs are written to `%LOCALAPPDATA%\\XListener\\xlistener.log` with rotation.
+
+The gaming supervisor pauses XListener when a configured game process is detected, asks the daemon to stop cooperatively, unloads the configured Ollama models, and restarts the daemon after the game exits. The initial process list covers `VALORANT-Win64-Shipping.exe`, `VALORANT.exe`, `cs2.exe`, and `LoveChoice.exe`, based on software detected on this laptop. Edit the `gaming.processes` list in `config.yaml` for additional games. Riot Client, Steam, Overwolf, NVIDIA services, Codex, VS Code, and Ollama are intentionally not triggers.
+
+To install automatic startup at your Windows user logon:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install_xlistener_task.ps1
+powershell -ExecutionPolicy Bypass -File scripts/status_xlistener_task.ps1
+```
+
+The scheduled task starts `xlistener supervise`, waits for games, restarts the daemon after crashes, and runs under your normal interactive Windows account. Remove it with `scripts/remove_xlistener_task.ps1`. The supervisor and daemon use separate rotating logs under `%LOCALAPPDATA%\\XListener`.

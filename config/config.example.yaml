@@ -38,5 +38,26 @@ learning:
 
 runtime:
   database_path: "%LOCALAPPDATA%/XListener/xlistener.sqlite3"
+  log_path: "%LOCALAPPDATA%/XListener/xlistener.log"
+  supervisor_log_path: "%LOCALAPPDATA%/XListener/supervisor.log"
+  instance_lock_path: "%LOCALAPPDATA%/XListener/xlistener.lock"
+  supervisor_lock_path: "%LOCALAPPDATA%/XListener/supervisor.lock"
+  stop_request_path: "%LOCALAPPDATA%/XListener/stop.request"
   log_level: INFO
   dry_run: false
+  retry_base_seconds: 30
+  retry_max_seconds: 1800
+  poll_error_seconds: 120
+  auth_error_seconds: 900
+
+gaming:
+  enabled: true
+  processes:
+    - VALORANT-Win64-Shipping.exe
+    - VALORANT.exe
+    - cs2.exe
+    - LoveChoice.exe
+  check_interval_seconds: 3
+  stop_grace_seconds: 10
+  restart_delay_seconds: 30
+  unload_ollama_models: true

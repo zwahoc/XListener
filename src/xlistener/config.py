@@ -200,8 +200,39 @@ class LearningConfig(BaseModel):
 
 class RuntimeConfig(BaseModel):
     database_path: Path = DEFAULT_RUNTIME_DIR / "xlistener.sqlite3"
+    log_path: Path = DEFAULT_RUNTIME_DIR / "xlistener.log"
+    supervisor_log_path: Path = DEFAULT_RUNTIME_DIR / "supervisor.log"
+    instance_lock_path: Path = DEFAULT_RUNTIME_DIR / "xlistener.lock"
+    supervisor_lock_path: Path = DEFAULT_RUNTIME_DIR / "supervisor.lock"
+    stop_request_path: Path = DEFAULT_RUNTIME_DIR / "stop.request"
     log_level: str = "INFO"
     dry_run: bool = False
+    retry_base_seconds: int = Field(default=30, ge=1)
+    retry_max_seconds: int = Field(default=1800, ge=1)
+    poll_error_seconds: int = Field(default=120, ge=5)
+    auth_error_seconds: int = Field(default=900, ge=30)
+
+    @model_validator(mode="after")
+    def validate_retry_range(self) -> "RuntimeConfig":
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError("retry_max_seconds must be greater than or equal to retry_base_seconds")
+        return self
+
+
+class GamingConfig(BaseModel):
+    enabled: bool = True
+    processes: list[str] = Field(
+        default_factory=lambda: [
+            "VALORANT-Win64-Shipping.exe",
+            "VALORANT.exe",
+            "cs2.exe",
+            "LoveChoice.exe",
+        ]
+    )
+    check_interval_seconds: int = Field(default=3, ge=1)
+    stop_grace_seconds: int = Field(default=10, ge=1)
+    restart_delay_seconds: int = Field(default=30, ge=1)
+    unload_ollama_models: bool = True
 
 
 class Settings(BaseModel):
@@ -212,6 +243,7 @@ class Settings(BaseModel):
     notification: NotificationConfig = Field(default_factory=NotificationConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    gaming: GamingConfig = Field(default_factory=GamingConfig)
     interests: list[dict[str, Any]] = Field(default_factory=lambda: list(DEFAULT_INTERESTS))
     ignore: list[str] = Field(default_factory=lambda: list(DEFAULT_IGNORE))
     author_context: dict[str, Any] = Field(default_factory=lambda: dict(DEFAULT_AUTHOR_CONTEXT))
@@ -236,6 +268,11 @@ class Settings(BaseModel):
 
     def ensure_runtime_dirs(self) -> None:
         self.runtime.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.supervisor_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.instance_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.supervisor_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.stop_request_path.parent.mkdir(parents=True, exist_ok=True)
         self.fetcher.storage_state_path.parent.mkdir(parents=True, exist_ok=True)
         self.fetcher.browser_profile_path.mkdir(parents=True, exist_ok=True)
 
@@ -283,6 +320,11 @@ def load_settings(
     settings.fetcher.storage_state_path = _runtime_path(settings.fetcher.storage_state_path)
     settings.fetcher.browser_profile_path = _runtime_path(settings.fetcher.browser_profile_path)
     settings.runtime.database_path = _runtime_path(settings.runtime.database_path)
+    settings.runtime.log_path = _runtime_path(settings.runtime.log_path)
+    settings.runtime.supervisor_log_path = _runtime_path(settings.runtime.supervisor_log_path)
+    settings.runtime.instance_lock_path = _runtime_path(settings.runtime.instance_lock_path)
+    settings.runtime.supervisor_lock_path = _runtime_path(settings.runtime.supervisor_lock_path)
+    settings.runtime.stop_request_path = _runtime_path(settings.runtime.stop_request_path)
     settings.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     settings.telegram_chat_id = os.getenv(settings.notification.chat_id_env)
     settings.ensure_runtime_dirs()

@@ -690,6 +690,13 @@ class PlaywrightXFetcher:
 
         if not self._context:
             await self.start()
+        try:
+            return await self._fetch_post_once(url)
+        except XAuthenticationRequired:
+            await self.authenticate()
+            return await self._fetch_post_once(url)
+
+    async def _fetch_post_once(self, url: str) -> Tweet | None:
         assert self._context is not None
         requested_id = _status_id(url)
         page = await self._context.new_page()

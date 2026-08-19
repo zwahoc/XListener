@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import httpx
@@ -13,11 +14,13 @@ from playwright.async_api import async_playwright
 
 from .classifier import OllamaTextClassifier
 from .config import load_settings
+from .daemon import InstanceAlreadyRunning, run_daemon
 from .db import SQLiteState
 from .fetchers.playwright_x import PlaywrightXFetcher, XAuthenticationRequired
 from .learning import learned_prompt_context
 from .notification import TelegramFeedbackConsumer, TelegramNotifier, render_notification, should_notify
 from .secrets import get_x_credentials
+from .supervisor import GamingSupervisor, game_processes_running, unload_ollama_models
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,6 +38,11 @@ def _parser() -> argparse.ArgumentParser:
     notify.add_argument("--dry-run", action="store_true")
     subparsers.add_parser("feedback-once")
     subparsers.add_parser("feedback-listen")
+    subparsers.add_parser("run")
+    subparsers.add_parser("run-once")
+    subparsers.add_parser("supervise")
+    subparsers.add_parser("gaming-status")
+    subparsers.add_parser("stop")
     subparsers.add_parser("db-status")
     return parser
 
@@ -112,6 +120,7 @@ async def _notify_latest(settings, dry_run: bool) -> None:
         return
     with SQLiteState(settings.runtime.database_path) as db:
         db.retain_tweet(tweet, "notification", status="classified")
+        db.update_tweet_payload(tweet)
         db.save_analysis(tweet.id, result, settings.llm.model, _raw_response)
         async with TelegramNotifier(settings) as notifier:
             message_id = await notifier.send(tweet, result)
@@ -184,6 +193,16 @@ def _db_status(settings) -> None:
 def main() -> None:
     args = _parser().parse_args()
     settings = load_settings(args.config, args.preferences)
+    log_level = getattr(logging, settings.runtime.log_level.upper(), logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    log_path = settings.runtime.supervisor_log_path if args.command == "supervise" else settings.runtime.log_path
+    file_handler = RotatingFileHandler(log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logging.basicConfig(level=log_level, handlers=[file_handler, console_handler])
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     try:
         if args.command == "check":
             _check(settings)
@@ -204,5 +223,27 @@ def main() -> None:
                 asyncio.run(_feedback_listen(settings))
             except KeyboardInterrupt:
                 pass
+        elif args.command == "run-once":
+            result = asyncio.run(run_daemon(settings, once=True))
+            print(json.dumps(result.__dict__ if result else {}))
+        elif args.command == "run":
+            try:
+                asyncio.run(run_daemon(settings))
+            except KeyboardInterrupt:
+                pass
+        elif args.command == "supervise":
+            try:
+                GamingSupervisor(settings).run_forever()
+            except KeyboardInterrupt:
+                pass
+        elif args.command == "gaming-status":
+            active = game_processes_running(settings.gaming.processes)
+            print(json.dumps({"gaming_enabled": settings.gaming.enabled, "active_game_processes": active}))
+        elif args.command == "stop":
+            settings.runtime.stop_request_path.touch()
+            unloaded = unload_ollama_models(settings) if settings.gaming.unload_ollama_models else []
+            print(json.dumps({"stop_requested": True, "unloaded_models": unloaded}))
     except XAuthenticationRequired as exc:
         raise SystemExit(f"X authentication needs attention: {exc}") from None
+    except InstanceAlreadyRunning as exc:
+        raise SystemExit(str(exc)) from None

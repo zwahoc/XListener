@@ -1084,6 +1084,10 @@ Exit criteria:
 - A real new post follows the full path to Telegram.
 - An irrelevant post is not retained beyond the minimal checkpoint.
 - A restart does not duplicate a terminal event.
+- `run` owns one runtime lock and cannot start a competing Chrome/Telegram worker.
+- A classification or notification failure remains durable and retries with bounded exponential backoff.
+- A notification retry reuses a saved analysis instead of re-running Ollama.
+- The feedback and missed-post listener runs concurrently with X polling.
 
 ### Milestone 6: Image-aware listener
 
@@ -1106,6 +1110,8 @@ Exit criteria:
 ### Milestone 8: Windows operational hardening
 
 Add setup scripts, scheduled-task registration, log rotation, health checks, and a 24-hour soak test.
+
+The gaming-aware supervisor is part of this milestone. It watches configurable executable names, cooperatively pauses the daemon while a game is active, unloads Ollama models, restarts after the configured cooldown, and owns a separate supervisor lock. Task Scheduler starts the supervisor at interactive user logon and restarts it after a crash.
 
 Exit criteria:
 

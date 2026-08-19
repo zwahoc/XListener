@@ -6,8 +6,9 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
-from .models import ClassificationResult, Tweet
+from .models import ClassificationResult, MediaAsset, RelatedPost, Tweet
 
 
 def utc_now() -> str:
@@ -156,6 +157,84 @@ class SQLiteState:
         row = self.connection.execute("SELECT 1 FROM processed_ids WHERE tweet_id = ?", (tweet_id,)).fetchone()
         return row is not None
 
+    @staticmethod
+    def _decode_list(value: str | None) -> list[Any]:
+        if not value:
+            return []
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+
+    @classmethod
+    def _tweet_from_row(cls, row: sqlite3.Row) -> Tweet:
+        created_at = row["created_at"]
+        return Tweet(
+            id=row["id"],
+            author_handle=row["author_handle"],
+            text=row["text"],
+            url=row["url"],
+            created_at=datetime.fromisoformat(created_at) if created_at else None,
+            is_reply=bool(row["is_reply"]),
+            in_reply_to_url=row["in_reply_to_url"],
+            media=[MediaAsset.model_validate(item) for item in cls._decode_list(row["media_json"])],
+            is_repost=bool(row["is_repost"]),
+            related_posts=[RelatedPost.model_validate(item) for item in cls._decode_list(row["related_posts_json"])],
+            context_complete=bool(row["context_complete"]),
+            source=row["source"],
+        )
+
+    @classmethod
+    def _analysis_from_row(cls, row: sqlite3.Row) -> ClassificationResult:
+        return ClassificationResult(
+            relevant=bool(row["relevant"]),
+            importance=int(row["importance"]),
+            topic=row["topic"],
+            tags=cls._decode_list(row["tags_json"]),
+            tone=row["tone"],
+            stance=row["stance"],
+            reason=row["reason"],
+            summary=row["summary"],
+        )
+
+    def get_tweet(self, tweet_id: str) -> Tweet | None:
+        row = self.connection.execute("SELECT * FROM tweets WHERE id = ?", (tweet_id,)).fetchone()
+        return self._tweet_from_row(row) if row else None
+
+    def get_analysis(self, tweet_id: str) -> ClassificationResult | None:
+        row = self.connection.execute("SELECT * FROM analyses WHERE tweet_id = ?", (tweet_id,)).fetchone()
+        return self._analysis_from_row(row) if row else None
+
+    def get_attempt_count(self, tweet_id: str) -> int:
+        row = self.connection.execute("SELECT attempt_count FROM tweets WHERE id = ?", (tweet_id,)).fetchone()
+        return int(row["attempt_count"] or 0) if row else 0
+
+    def recent_notification_summaries(self, limit: int = 5) -> list[str]:
+        rows = self.connection.execute(
+            """
+            SELECT a.summary
+            FROM notifications n
+            JOIN analyses a ON a.tweet_id = n.tweet_id
+            ORDER BY n.sent_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [str(row["summary"]) for row in reversed(rows)]
+
+    def list_retry_tweets(self, limit: int = 20) -> list[Tweet]:
+        rows = self.connection.execute(
+            """
+            SELECT * FROM tweets
+            WHERE status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= ?
+            ORDER BY COALESCE(next_retry_at, first_seen_at), first_seen_at
+            LIMIT ?
+            """,
+            (utc_now(), limit),
+        ).fetchall()
+        return [self._tweet_from_row(row) for row in rows]
+
     def record_processed_id(self, tweet_id: str, outcome: str, retention_days: int = 30) -> None:
         expires = (datetime.now(timezone.utc) + timedelta(days=retention_days)).isoformat()
         self.connection.execute(
@@ -211,6 +290,61 @@ class SQLiteState:
         )
         self.connection.commit()
 
+    def update_tweet_payload(self, tweet: Tweet) -> None:
+        self.connection.execute(
+            """
+            UPDATE tweets
+            SET author_handle = ?, text = ?, url = ?, created_at = ?, is_reply = ?,
+                in_reply_to_url = ?, media_json = ?, is_repost = ?, related_posts_json = ?,
+                context_complete = ?, source = ?
+            WHERE id = ?
+            """,
+            (
+                tweet.author_handle,
+                tweet.text,
+                str(tweet.url),
+                tweet.created_at.isoformat() if tweet.created_at else None,
+                int(tweet.is_reply),
+                str(tweet.in_reply_to_url) if tweet.in_reply_to_url else None,
+                json.dumps([item.model_dump(mode="json") for item in tweet.media]),
+                int(tweet.is_repost),
+                json.dumps([item.model_dump(mode="json") for item in tweet.related_posts]),
+                int(tweet.context_complete),
+                tweet.source,
+                tweet.id,
+            ),
+        )
+        self.connection.commit()
+
+    def discard_tweet(self, tweet_id: str) -> None:
+        self.connection.execute("DELETE FROM feedback WHERE tweet_id = ?", (tweet_id,))
+        self.connection.execute("DELETE FROM notifications WHERE tweet_id = ?", (tweet_id,))
+        self.connection.execute("DELETE FROM analyses WHERE tweet_id = ?", (tweet_id,))
+        self.connection.execute("DELETE FROM tweets WHERE id = ?", (tweet_id,))
+        self.connection.commit()
+
+    def mark_failure(
+        self,
+        tweet_id: str,
+        stage: str,
+        error: str,
+        retry_delay_seconds: int,
+        retention_days: int = 30,
+    ) -> None:
+        row = self.connection.execute("SELECT attempt_count FROM tweets WHERE id = ?", (tweet_id,)).fetchone()
+        attempt_count = int(row["attempt_count"] or 0) + 1 if row else 1
+        next_retry = datetime.now(timezone.utc) + timedelta(seconds=max(1, retry_delay_seconds))
+        self.connection.execute(
+            """
+            UPDATE tweets
+            SET status = 'failed', last_error = ?, failure_stage = ?, attempt_count = ?, next_retry_at = ?
+            WHERE id = ?
+            """,
+            (error[:1000], stage, attempt_count, next_retry.isoformat(), tweet_id),
+        )
+        self.connection.commit()
+        self.record_processed_id(tweet_id, "retry", retention_days=retention_days)
+
     def save_analysis(self, tweet_id: str, result: ClassificationResult, model: str, raw_response: str | None = None) -> None:
         self.connection.execute(
             """
@@ -240,7 +374,15 @@ class SQLiteState:
                 raw_response,
             ),
         )
-        self.connection.execute("UPDATE tweets SET status = 'classified', processed_at = ? WHERE id = ?", (utc_now(), tweet_id))
+        self.connection.execute(
+            """
+            UPDATE tweets
+            SET status = 'classified', processed_at = ?, last_error = NULL,
+                failure_stage = NULL, attempt_count = 0, next_retry_at = NULL
+            WHERE id = ?
+            """,
+            (utc_now(), tweet_id),
+        )
         self.connection.commit()
 
     def record_notification(self, tweet_id: str, provider_message_id: str, provider: str = "telegram") -> None:
@@ -256,7 +398,15 @@ class SQLiteState:
             """,
             (tweet_id, provider, provider_message_id, utc_now()),
         )
-        self.connection.execute("UPDATE tweets SET status = 'notified', processed_at = ? WHERE id = ?", (utc_now(), tweet_id))
+        self.connection.execute(
+            """
+            UPDATE tweets
+            SET status = 'notified', processed_at = ?, last_error = NULL,
+                failure_stage = NULL, attempt_count = 0, next_retry_at = NULL
+            WHERE id = ?
+            """,
+            (utc_now(), tweet_id),
+        )
         self.connection.commit()
 
     def save_feedback(
