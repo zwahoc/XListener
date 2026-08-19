@@ -35,6 +35,6 @@ The first usable text product is implemented and running on the Windows developm
 
 - X can change its web interface or challenge automated sessions.
 - The current fetcher is intentionally narrow: one account and a bounded recent window.
-- The local 4B model can make mistakes on sarcasm, ambiguous replies, and missing context.
+- The local 8B model can still make mistakes on sarcasm, ambiguous replies, and missing context; it also has higher latency and memory use.
 - Ignored posts are not historically archived; recovery requires the user to submit a URL.
 - Windows is the only fully tested operational platform.

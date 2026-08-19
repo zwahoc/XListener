@@ -54,7 +54,7 @@ py -3.14 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 python -m playwright install chromium
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 Copy-Item .env.example .env
 Copy-Item config/config.example.yaml config.yaml
 Copy-Item config/preferences.example.yaml preferences.yaml

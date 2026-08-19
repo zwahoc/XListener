@@ -14,7 +14,7 @@ The following sources informed the architecture and adapter decisions. They are 
 | [Ollama chat API](https://docs.ollama.com/api/chat) | Future multimodal routing and current local model integration. |
 | [Telegram Bot API](https://core.telegram.org/bots/api#sendmessage) | Message limits, HTML formatting, inline keyboards, and update polling. |
 | [Windows schtasks](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create) | User-logon startup and restart-on-failure behavior. |
-| [Qwen3 models](https://ollama.com/library/qwen3) | Initial 4B text model selection. |
+| [Qwen3 models](https://ollama.com/library/qwen3) | Qwen3 model sizing and the current 8B production selection. |
 | [Qwen3-VL models](https://ollama.com/library/qwen3-vl) | Planned image milestone model selection. |
 | [ythx-101/x-tweet-fetcher](https://github.com/ythx-101/x-tweet-fetcher) | Reviewed for parser, ledger, and alternate-backend ideas; not used as the native authenticated X fetcher. |
 

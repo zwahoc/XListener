@@ -57,6 +57,6 @@ Notifications include a summary, model reasoning, importance, generated tags, Ma
 
 - No X posts: check the saved Chrome session with auth-x --manual and inspect xlistener.log.
 - No Telegram messages: run check, verify the bot token/chat ID, and inspect retry errors.
-- Model unavailable: start Ollama and verify ollama list contains qwen3:4b.
+- Model unavailable: start Ollama and verify ollama list contains qwen3:8b.
 - Monitoring paused: check the tray status, configured game processes, and pause.request.
 - Duplicate startup concern: use status_xlistener_task.ps1; the daemon and supervisor locks reject competing instances.

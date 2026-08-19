@@ -1,6 +1,6 @@
 # XListener Detailed Build Plan
 
-Status: proposed for review  
+Status: historical decision record; production model updated to qwen3:8b on 2026-08-20 after benchmarking
 Research basis: 2026-08-18  
 Target: Windows 11 on the Acer Nitro AN515-58
 

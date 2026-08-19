@@ -32,7 +32,7 @@ XListener is intentionally a small local daemon rather than a hosted platform. T
     PlaywrightXFetcher  OllamaTextClassifier  Telegram
            |                 |                  |
            v                 v                  v
-           X web         qwen3:4b          Bot API / chat
+           X web         qwen3:8b          Bot API / chat
            |
            v
        SQLiteState

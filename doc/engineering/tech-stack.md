@@ -9,7 +9,7 @@
 | Configuration | Pydantic 2, PyYAML, python-dotenv | Validated settings and local overrides |
 | Browser access | Playwright for Python with installed Google Chrome | Authenticated X retrieval |
 | Persistence | SQLite via the standard library | Cursor, dedupe, durable work, feedback, and learned tag affinity |
-| Local inference | Ollama HTTP/Python client | Text classification with qwen3:4b |
+| Local inference | Ollama HTTP/Python client | Text classification with qwen3:8b |
 | Notifications | Telegram Bot API through httpx | Private-chat delivery and inline feedback |
 | Secrets | keyring and Windows Credential Manager | X username/password storage |
 | Windows lifecycle | Task Scheduler and pythonw.exe | User-logon startup without a console |
@@ -28,7 +28,7 @@ These constraints keep the first release inexpensive, private, and operable on o
 
 ## Model Routing
 
-The active text model is qwen3:4b. The configuration already names qwen3-vl:4b as the future vision model, but image and video processing are not yet part of the production pipeline. Video transcription is planned around faster-whisper and FFmpeg after the image milestone.
+The active text model is qwen3:8b. It is approximately 5.2 GB and is used with partial CPU/GPU offloading on the development laptop's 4 GB RTX 3050. The configuration names qwen3-vl:4b as the future vision model, but image and video processing are not yet part of the production pipeline. Video transcription is planned around faster-whisper and FFmpeg after the image milestone.
 
 ## Provider Contracts
 

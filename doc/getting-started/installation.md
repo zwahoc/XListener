@@ -36,7 +36,7 @@ Video processing will also require an FFmpeg installation when that roadmap mile
 Pull the configured text model in Ollama:
 
 ~~~powershell
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 ~~~
 
 Copy the local configuration templates:

@@ -16,7 +16,7 @@ fetcher:
   headless: true
 
 llm:
-  model: qwen3:4b
+  model: qwen3:8b
   vision_model: qwen3-vl:4b
   base_url: http://localhost:11434
   temperature: 0

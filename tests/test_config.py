@@ -12,7 +12,7 @@ def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
     assert settings.fetcher.browser_channel == "chrome"
     assert settings.fetcher.poll_min_seconds == 10
     assert settings.fetcher.poll_max_seconds == 90
-    assert settings.llm.model == "qwen3:4b"
+    assert settings.llm.model == "qwen3:8b"
     assert settings.gaming.processes == ["VALORANT-Win64-Shipping.exe", "VALORANT.exe", "cs2.exe", "LoveChoice.exe"]
     assert settings.runtime.pause_request_path.name == "pause.request"
     assert settings.runtime.supervisor_status_path.name == "supervisor-status.json"

@@ -31,7 +31,7 @@ The examples contain the current Codex-focused profile. The monitored author con
 | fetcher.poll_max_seconds | 90 | Upper normal polling bound |
 | fetcher.bootstrap_mode | baseline | Avoid historical notifications on first startup |
 | notification.min_importance | 6 | Final delivery threshold |
-| llm.model | qwen3:4b | Local text classifier |
+| llm.model | qwen3:8b | Local text classifier |
 | runtime.retry_base_seconds | 30 | Initial retry delay |
 | gaming.check_interval_seconds | 3 | Game-process check interval |
 | gaming.restart_delay_seconds | 30 | Cooldown before resuming after gaming |

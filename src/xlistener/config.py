@@ -186,7 +186,7 @@ class FetcherConfig(BaseModel):
 
 
 class LlmConfig(BaseModel):
-    model: str = "qwen3:4b"
+    model: str = "qwen3:8b"
     vision_model: str = "qwen3-vl:4b"
     base_url: str = "http://localhost:11434"
     temperature: float = 0

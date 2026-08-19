@@ -8,7 +8,7 @@ Original post by @thsottiaux
 Summary
 <complete model summary>
 
-Reasoning from qwen3:4b
+Reasoning from qwen3:8b
 <narrative model reasoning>
 
 Importance: 9/10
