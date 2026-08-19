@@ -55,6 +55,13 @@ Phase 1 and Phase 2 diagnostics:
 .\.venv\Scripts\python.exe -m xlistener db-status
 .\.venv\Scripts\python.exe -m xlistener auth-x
 .\.venv\Scripts\python.exe -m xlistener fetch-once --limit 5
+.\.venv\Scripts\python.exe -m xlistener classify-latest
+.\.venv\Scripts\python.exe -m xlistener notify-latest --dry-run
+.\.venv\Scripts\python.exe -m xlistener feedback-once
 ```
 
 `auth-x --manual` opens the dedicated installed-Chrome profile as an ordinary browser process for the one-time login, then verifies and captures the session after you close it. `fetch-once` reuses that persistent profile and falls back to public profile cards where X exposes them; replies may remain unavailable until authentication succeeds. Google Chrome must be installed for the manual bootstrap.
+
+`classify-latest` fetches the newest item, resolves a bounded reply/quote/repost context bundle, and asks the local Ollama text model for a schema-validated relevance decision. It prints the result locally and does not send a Telegram notification or persist ignored content.
+
+`notify-latest` applies the configured relevance threshold and sends qualifying posts with a compact Telegram message containing the relationship line, complete model summary, narrative reasoning, importance, tags, Malaysia-time timestamps, and a link to the original post. Inline rating buttons run from 1 (irrelevant) to 10 (very useful). Successful notifications are retained in SQLite before feedback can be accepted. `feedback-once` consumes pending private-chat button callbacks once and persists both the rating and Telegram update offset.

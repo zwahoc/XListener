@@ -3,7 +3,35 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
+
+
+TAG_VOCABULARY = frozenset(
+    {
+        "codex",
+        "chatgpt",
+        "reset",
+        "quota",
+        "limits",
+        "release",
+        "update",
+        "capability",
+        "safety",
+        "developer_tools",
+        "availability",
+        "api",
+        "model",
+        "integration",
+        "reply",
+        "quote",
+        "repost",
+        "marketing",
+        "meme",
+        "feedback_request",
+        "conversation",
+        "other",
+    }
+)
 
 
 class MediaAsset(BaseModel):
@@ -47,3 +75,30 @@ class ClassificationResult(BaseModel):
     reason: str
     summary: str
 
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        normalized: list[str] = []
+        for item in value:
+            tag = str(item).strip().lower().replace("-", "_").replace(" ", "_")
+            if tag and tag not in normalized:
+                normalized.append(tag)
+        return normalized
+
+    @field_validator("tags")
+    @classmethod
+    def restrict_tags(cls, value: list[str]) -> list[str]:
+        unknown = sorted(set(value) - TAG_VOCABULARY)
+        if unknown:
+            raise ValueError(f"unknown classification tags: {unknown}")
+        return value
+
+    @field_validator("topic", "reason", "summary")
+    @classmethod
+    def require_nonempty_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("classification text fields cannot be empty")
+        return stripped

@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from xlistener.fetchers.playwright_x import parse_tweet_articles
+from xlistener.fetchers.playwright_x import (
+    _apply_graphql_relationships,
+    _graphql_tweet_metadata,
+    parse_tweet_articles,
+)
+from xlistener.models import Tweet
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "x_profile_articles.html"
@@ -30,3 +35,63 @@ def test_parser_supports_current_rendered_profile_cards() -> None:
     assert tweets[0].text == "Codex has a new reset detail."
     assert tweets[1].is_reply is True
     assert tweets[1].related_posts[0].id == "190"
+
+
+def test_graphql_relationships_restore_reply_parent_from_authenticated_timeline() -> None:
+    tweets = [
+        Tweet(
+            id="201",
+            author_handle="thsottiaux",
+            text="This reply adds useful context.",
+            url="https://x.com/thsottiaux/status/201",
+            source="test",
+        )
+    ]
+    payload = {
+        "data": {
+            "user": {
+                "result": {
+                    "timeline": {
+                        "timeline": {
+                            "instructions": [
+                                {
+                                    "entries": [
+                                        {
+                                            "content": {
+                                                "itemContent": {
+                                                    "tweet_results": {
+                                                        "result": {
+                                                            "__typename": "Tweet",
+                                                            "rest_id": "201",
+                                                            "core": {
+                                                                "user_results": {
+                                                                    "result": {"core": {"screen_name": "thsottiaux"}}
+                                                                }
+                                                            },
+                                                            "legacy": {
+                                                                "in_reply_to_status_id_str": "190",
+                                                                "in_reply_to_screen_name": "parent_user",
+                                                            },
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    metadata = _graphql_tweet_metadata(payload)
+    enriched = _apply_graphql_relationships(tweets, metadata)
+    reply = next(tweet for tweet in enriched if tweet.id == "201")
+
+    assert reply.is_reply is True
+    assert str(reply.in_reply_to_url) == "https://x.com/parent_user/status/190"
+    assert reply.related_posts[0].relationship == "reply_parent"
+    assert reply.related_posts[0].author_handle == "parent_user"

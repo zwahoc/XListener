@@ -20,7 +20,7 @@ llm:
   vision_model: qwen3-vl:4b
   base_url: http://localhost:11434
   temperature: 0
-  keep_alive: "0"
+  keep_alive: "10m"
 
 notification:
   min_importance: 6

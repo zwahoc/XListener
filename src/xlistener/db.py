@@ -101,6 +101,8 @@ class SQLiteState:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_tweet_source
+            ON feedback(tweet_id, source);
             """
         )
         self.connection.commit()
@@ -216,3 +218,54 @@ class SQLiteState:
         self.connection.execute("UPDATE tweets SET status = 'classified', processed_at = ? WHERE id = ?", (utc_now(), tweet_id))
         self.connection.commit()
 
+    def record_notification(self, tweet_id: str, provider_message_id: str, provider: str = "telegram") -> None:
+        self.connection.execute(
+            """
+            INSERT INTO notifications(tweet_id, provider, provider_message_id, sent_at, last_error)
+            VALUES(?, ?, ?, ?, NULL)
+            ON CONFLICT(tweet_id) DO UPDATE SET
+                provider=excluded.provider,
+                provider_message_id=excluded.provider_message_id,
+                sent_at=excluded.sent_at,
+                last_error=NULL
+            """,
+            (tweet_id, provider, provider_message_id, utc_now()),
+        )
+        self.connection.execute("UPDATE tweets SET status = 'notified', processed_at = ? WHERE id = ?", (utc_now(), tweet_id))
+        self.connection.commit()
+
+    def save_feedback(
+        self,
+        tweet_id: str,
+        rating: int,
+        source: str = "telegram_inline",
+        telegram_update_id: str | None = None,
+    ) -> None:
+        if not 1 <= rating <= 10:
+            raise ValueError("rating must be between 1 and 10")
+        self.connection.execute(
+            """
+            INSERT INTO feedback(tweet_id, rating, source, telegram_update_id, created_at)
+            VALUES(?, ?, ?, ?, ?)
+            ON CONFLICT(tweet_id, source) DO UPDATE SET
+                rating=excluded.rating,
+                telegram_update_id=excluded.telegram_update_id,
+                created_at=excluded.created_at
+            """,
+            (tweet_id, rating, source, telegram_update_id, utc_now()),
+        )
+        self.connection.commit()
+
+    def get_telegram_offset(self) -> int:
+        row = self.connection.execute("SELECT value FROM telegram_state WHERE key = 'update_offset'").fetchone()
+        return int(row["value"]) if row else 0
+
+    def set_telegram_offset(self, offset: int) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO telegram_state(key, value) VALUES('update_offset', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (str(offset),),
+        )
+        self.connection.commit()

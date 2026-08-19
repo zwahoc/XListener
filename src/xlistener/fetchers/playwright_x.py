@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
 from ..config import Settings
+from ..context import ContextResolver
 from ..models import MediaAsset, RelatedPost, Tweet
 from ..secrets import ensure_x_credentials
 
@@ -79,6 +80,130 @@ def _absolute_url(href: str | None) -> str | None:
     if not href:
         return None
     return urljoin("https://x.com", href)
+
+
+def _unwrap_graphql_tweet(value: object) -> dict[str, object] | None:
+    """Unwrap the visibility wrapper X commonly puts around Tweet results."""
+
+    current = value
+    while isinstance(current, dict) and current.get("__typename") in {
+        "TweetWithVisibilityResults",
+        "TweetWithVisibilityResult",
+    }:
+        current = current.get("tweet")
+    return current if isinstance(current, dict) and current.get("__typename") == "Tweet" else None
+
+
+def _walk_graphql_tweets(value: object) -> Iterable[dict[str, object]]:
+    if isinstance(value, dict):
+        tweet_results = value.get("tweet_results")
+        if isinstance(tweet_results, dict):
+            tweet = _unwrap_graphql_tweet(tweet_results.get("result"))
+            if tweet is not None:
+                yield tweet
+        for child in value.values():
+            yield from _walk_graphql_tweets(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_graphql_tweets(child)
+
+
+def _graphql_tweet_metadata(payload: object) -> dict[str, dict[str, object]]:
+    """Extract relationship metadata from an X GraphQL response.
+
+    X's rendered DOM omits reply/quote fields, while the authenticated
+    timeline response still exposes them under the legacy Tweet object.
+    """
+
+    metadata: dict[str, dict[str, object]] = {}
+    for tweet in _walk_graphql_tweets(payload):
+        tweet_id = str(tweet.get("rest_id") or "")
+        if not tweet_id:
+            continue
+        legacy = tweet.get("legacy") if isinstance(tweet.get("legacy"), dict) else {}
+        core = tweet.get("core") if isinstance(tweet.get("core"), dict) else {}
+        user_result = core.get("user_results") if isinstance(core, dict) else None
+        user = user_result.get("result") if isinstance(user_result, dict) else None
+        user_core = user.get("core") if isinstance(user, dict) else None
+        entry: dict[str, object] = {
+            "author_handle": user_core.get("screen_name") if isinstance(user_core, dict) else None,
+            "reply_id": legacy.get("in_reply_to_status_id_str"),
+            "reply_handle": legacy.get("in_reply_to_screen_name"),
+            "quote_id": None,
+            "quote_handle": None,
+            "repost_id": None,
+            "repost_handle": None,
+        }
+
+        quoted = tweet.get("quoted_status_result")
+        quoted_result = quoted.get("result") if isinstance(quoted, dict) else None
+        quoted_tweet = _unwrap_graphql_tweet(quoted_result)
+        if quoted_tweet:
+            entry["quote_id"] = quoted_tweet.get("rest_id")
+            quoted_core = quoted_tweet.get("core")
+            quoted_user_results = quoted_core.get("user_results") if isinstance(quoted_core, dict) else None
+            quoted_user = quoted_user_results.get("result") if isinstance(quoted_user_results, dict) else None
+            quoted_user_core = quoted_user.get("core") if isinstance(quoted_user, dict) else None
+            entry["quote_handle"] = quoted_user_core.get("screen_name") if isinstance(quoted_user_core, dict) else None
+
+        retweeted = legacy.get("retweeted_status_result") if isinstance(legacy, dict) else None
+        if not retweeted:
+            retweeted = tweet.get("retweeted_status_result")
+        retweeted_result = retweeted.get("result") if isinstance(retweeted, dict) else None
+        retweeted_tweet = _unwrap_graphql_tweet(retweeted_result)
+        if retweeted_tweet:
+            entry["repost_id"] = retweeted_tweet.get("rest_id")
+            repost_core = retweeted_tweet.get("core")
+            repost_user_results = repost_core.get("user_results") if isinstance(repost_core, dict) else None
+            repost_user = repost_user_results.get("result") if isinstance(repost_user_results, dict) else None
+            repost_user_core = repost_user.get("core") if isinstance(repost_user, dict) else None
+            entry["repost_handle"] = repost_user_core.get("screen_name") if isinstance(repost_user_core, dict) else None
+
+        metadata[tweet_id] = entry
+    return metadata
+
+
+def _apply_graphql_relationships(tweets: list[Tweet], metadata: dict[str, dict[str, object]]) -> list[Tweet]:
+    """Merge GraphQL relationships into tweets parsed from the visible DOM."""
+
+    enriched: list[Tweet] = []
+    for tweet in tweets:
+        info = metadata.get(tweet.id)
+        if not info:
+            enriched.append(tweet)
+            continue
+        related = list(tweet.related_posts)
+
+        def add(relationship: str, related_id: object, handle: object) -> None:
+            if not related_id or any(post.id == str(related_id) and post.relationship == relationship for post in related):
+                return
+            related.append(
+                RelatedPost(
+                    relationship=relationship,
+                    id=str(related_id),
+                    author_handle=str(handle).lower() if handle else None,
+                    url=f"https://x.com/{str(handle).lower() if handle else 'i'}/status/{related_id}",
+                )
+            )
+
+        add("reply_parent", info.get("reply_id"), info.get("reply_handle"))
+        add("quoted", info.get("quote_id"), info.get("quote_handle"))
+        add("reposted", info.get("repost_id"), info.get("repost_handle"))
+        is_reply = bool(info.get("reply_id")) or tweet.is_reply
+        is_repost = bool(info.get("repost_id")) or tweet.is_repost
+        enriched.append(
+            tweet.model_copy(
+                update={
+                    "is_reply": is_reply,
+                    "in_reply_to_url": next((post.url for post in related if post.relationship == "reply_parent"), None),
+                    "is_repost": is_repost,
+                    "related_posts": related[:3],
+                    "context_complete": tweet.context_complete and (not is_reply or any(post.relationship == "reply_parent" for post in related)),
+                    "raw_payload": {**tweet.raw_payload, "graphql_relationships": True},
+                }
+            )
+        )
+    return enriched
 
 
 def _is_status_link(link: Tag) -> bool:
@@ -513,6 +638,24 @@ class PlaywrightXFetcher:
         raise XAuthenticationRequired(f"Could not find visible login action: {labels}")
 
     async def _fetch_page(self, page: Page, url: str) -> list[Tweet]:
+        graphql_payloads: list[object] = []
+        response_tasks: list[asyncio.Task[None]] = []
+
+        async def capture_response(response) -> None:
+            if "/i/api/graphql/" not in response.url:
+                return
+            operation = response.url.split("/graphql/", 1)[-1].split("?", 1)[0]
+            if operation in {"DataSaverMode", "SidebarUserRecommendations", "ExploreSidebar", "ProfileSpotlightsQuery"}:
+                return
+            try:
+                graphql_payloads.append(await response.json())
+            except Exception:
+                return
+
+        def on_response(response) -> None:
+            response_tasks.append(asyncio.create_task(capture_response(response)))
+
+        page.on("response", on_response)
         await page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         if "/i/flow/login" in page.url or "/login" in page.url:
             raise XAuthenticationRequired("Saved X session is expired")
@@ -522,7 +665,16 @@ class PlaywrightXFetcher:
             content = await page.content()
             if "Something went wrong" in content or "Log in" in content:
                 raise RuntimeError("X profile did not expose tweet articles; session or selectors may have changed")
-        return parse_tweet_articles(await page.content(), self.settings.account.handle)
+        # Timeline GraphQL responses arrive just after the initial DOM. Give
+        # the response handlers a short bounded window, then merge metadata.
+        await page.wait_for_timeout(1_000)
+        if response_tasks:
+            await asyncio.gather(*response_tasks, return_exceptions=True)
+        parsed = parse_tweet_articles(await page.content(), self.settings.account.handle)
+        metadata: dict[str, dict[str, object]] = {}
+        for payload in graphql_payloads:
+            metadata.update(_graphql_tweet_metadata(payload))
+        return _apply_graphql_relationships(parsed, metadata)
 
     async def fetch_recent(self, limit: int = 20) -> list[Tweet]:
         if not self._context:
@@ -532,6 +684,27 @@ class PlaywrightXFetcher:
         except XAuthenticationRequired:
             await self.authenticate()
             return await self._fetch_recent_once(limit)
+
+    async def fetch_post(self, url: str) -> Tweet | None:
+        """Fetch one canonical status page and return the requested post."""
+
+        if not self._context:
+            await self.start()
+        assert self._context is not None
+        requested_id = _status_id(url)
+        page = await self._context.new_page()
+        try:
+            parsed = await self._fetch_page(page, url)
+        finally:
+            await page.close()
+        if requested_id:
+            return next((tweet for tweet in parsed if tweet.id == requested_id), None)
+        return parsed[0] if parsed else None
+
+    async def enrich_context(self, tweet: Tweet) -> Tweet:
+        """Hydrate a bounded reply/quote/repost relationship bundle."""
+
+        return await ContextResolver(self.fetch_post, max_depth=2, max_related=3).resolve(tweet)
 
     async def _fetch_recent_once(self, limit: int) -> list[Tweet]:
         assert self._context is not None

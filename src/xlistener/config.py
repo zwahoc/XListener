@@ -87,7 +87,7 @@ class LlmConfig(BaseModel):
     vision_model: str = "qwen3-vl:4b"
     base_url: str = "http://localhost:11434"
     temperature: float = 0
-    keep_alive: str = "0"
+    keep_alive: str = "10m"
 
 
 class NotificationConfig(BaseModel):
