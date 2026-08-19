@@ -13,6 +13,10 @@ def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
     assert settings.fetcher.poll_min_seconds == 10
     assert settings.fetcher.poll_max_seconds == 90
     assert settings.llm.model == "qwen3:4b"
+    assert settings.author_context["products_of_interest"] == ["Codex", "ChatGPT", "ChatGPT Work", "Codex-CLI"]
+    assert len(settings.entity_context) == 11
+    assert settings.entity_context[0]["products"] == ["Claude", "Claude Code", "Opus 5", "Fable 5"]
+    assert settings.entity_context[-1]["organization"] == "Microsoft"
 
 
 def test_environment_handle_overrides_yaml_account(tmp_path: Path, monkeypatch) -> None:
@@ -27,3 +31,5 @@ def test_environment_handle_overrides_yaml_account(tmp_path: Path, monkeypatch) 
 
     assert settings.account.handle == "env_account"
     assert settings.account.profile_url == "https://x.com/env_account"
+    assert settings.author_context["handle"] == "env_account"
+    assert settings.author_context["name"] == "unknown"

@@ -42,6 +42,98 @@ DEFAULT_IGNORE = [
     "General company news unrelated to Codex or a meaningful capability change",
 ]
 
+DEFAULT_AUTHOR_CONTEXT = {
+    "handle": "thsottiaux",
+    "name": "Tibo",
+    "organization": "OpenAI",
+    "role": "OpenAI employee",
+    "products_of_interest": ["Codex", "ChatGPT", "ChatGPT Work", "Codex-CLI"],
+    "notes": [
+        "The account may post product information, competitive commentary, jokes, sarcasm, marketing, and engagement questions.",
+        "Do not treat every post as an official announcement or literal statement.",
+    ],
+}
+
+DEFAULT_ENTITY_CONTEXT = [
+    {
+        "organization": "Anthropic",
+        "relationship": "direct competitor",
+        "products": ["Claude", "Claude Code", "Opus 5", "Fable 5"],
+        "description": "Strongest overlap with OpenAI in frontier models, coding agents, APIs, and enterprise AI.",
+    },
+    {
+        "organization": "Google DeepMind",
+        "relationship": "direct competitor",
+        "products": ["Gemini", "Gemini 3.5", "Gemini 3.6 Flash", "Gemini API"],
+        "description": "Competes across general AI, multimodal models, coding, agents, and enterprise AI.",
+    },
+    {
+        "organization": "xAI",
+        "relationship": "direct competitor",
+        "products": ["Grok", "Grok 4.6", "Grok API", "Grok Build"],
+        "description": "Competes with ChatGPT, OpenAI models, APIs, and coding or agent products.",
+    },
+    {
+        "organization": "Moonshot AI",
+        "relationship": "competitor",
+        "products": ["Kimi", "Kimi K3", "Kimi Code", "Kimi Work"],
+        "description": "Competes in reasoning, coding, long-context models, and agents.",
+    },
+    {
+        "organization": "Alibaba / Qwen",
+        "relationship": "competitor",
+        "products": ["Qwen", "Qwen3.8-Max", "Qwen Code", "Qwen3-Coder"],
+        "description": "Strong competitor in open models, coding, APIs, and agentic AI.",
+    },
+    {
+        "organization": "Meta",
+        "relationship": "competitor",
+        "products": ["Meta AI", "Llama", "Muse"],
+        "description": "Competes in assistants, foundation models, multimodal AI, and open models.",
+    },
+    {
+        "organization": "DeepSeek",
+        "relationship": "competitor",
+        "products": ["DeepSeek", "DeepSeek V4 Pro", "DeepSeek API"],
+        "description": "Competes heavily on reasoning, coding, and price-to-performance.",
+    },
+    {
+        "organization": "Z.ai / Zhipu AI",
+        "relationship": "competitor",
+        "products": ["GLM", "GLM-5.3", "ZCode"],
+        "description": "Competes in foundation models, coding agents, and enterprise AI.",
+    },
+    {
+        "organization": "MiniMax",
+        "relationship": "competitor",
+        "products": ["MiniMax M3", "MiniMax H3", "MiniMax API"],
+        "description": "Competes across LLMs, coding, agents, image, video, and audio AI.",
+    },
+    {
+        "organization": "Mistral AI",
+        "relationship": "competitor",
+        "products": ["Le Chat", "Mistral Large", "Devstral", "Mistral Vibe"],
+        "description": "Competes in enterprise AI, APIs, open models, and coding.",
+    },
+    {
+        "organization": "Microsoft",
+        "relationship": "strategic partner, investor, and partial competitor",
+        "products": ["Microsoft Copilot", "GitHub Copilot", "Azure OpenAI", "Microsoft Foundry"],
+        "description": "Closely partnered with OpenAI, but also builds overlapping AI products and platforms.",
+    },
+]
+
+DEFAULT_INTERPRETATION_RULES = [
+    "Evaluate the monitored author's own text as the primary evidence.",
+    "Use parent, quoted, and reposted posts to explain references, not to transfer their importance automatically.",
+    "A short reply must add concrete information to receive a high importance score.",
+    "A reply that only jokes, reacts, agrees, mocks, or makes an ambiguous remark should usually score low.",
+    "If tone or meaning is uncertain, be conservative and say so in the reasoning.",
+    "Competitor-only news is not automatically relevant to Codex or ChatGPT.",
+    "A competitor reference is relevant when it makes a concrete comparison or reveals useful information about OpenAI products.",
+    "Do not assume an unknown product belongs to OpenAI or that its changes affect Codex.",
+]
+
 
 def _runtime_path(value: str | Path) -> Path:
     expanded = os.path.expandvars(os.path.expanduser(str(value)))
@@ -122,8 +214,25 @@ class Settings(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     interests: list[dict[str, Any]] = Field(default_factory=lambda: list(DEFAULT_INTERESTS))
     ignore: list[str] = Field(default_factory=lambda: list(DEFAULT_IGNORE))
+    author_context: dict[str, Any] = Field(default_factory=lambda: dict(DEFAULT_AUTHOR_CONTEXT))
+    entity_context: list[dict[str, Any]] = Field(default_factory=lambda: list(DEFAULT_ENTITY_CONTEXT))
+    interpretation_rules: list[str] = Field(default_factory=lambda: list(DEFAULT_INTERPRETATION_RULES))
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+
+    @model_validator(mode="after")
+    def align_author_context(self) -> "Settings":
+        context_handle = str(self.author_context.get("handle", "")).strip().lstrip("@").lower()
+        if context_handle and context_handle != self.account.handle:
+            self.author_context = {
+                "handle": self.account.handle,
+                "name": "unknown",
+                "organization": "unknown",
+                "role": "unknown",
+                "products_of_interest": [],
+                "notes": ["No account-specific background has been configured for this monitored handle."],
+            }
+        return self
 
     def ensure_runtime_dirs(self) -> None:
         self.runtime.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +273,11 @@ def load_settings(
         preference_raw = _read_yaml(Path(preferences_path))
         raw["interests"] = preference_raw.get("interests", raw.get("interests", DEFAULT_INTERESTS))
         raw["ignore"] = preference_raw.get("ignore", raw.get("ignore", DEFAULT_IGNORE))
+        raw["author_context"] = preference_raw.get("author_context", raw.get("author_context", DEFAULT_AUTHOR_CONTEXT))
+        raw["entity_context"] = preference_raw.get("entity_context", raw.get("entity_context", DEFAULT_ENTITY_CONTEXT))
+        raw["interpretation_rules"] = preference_raw.get(
+            "interpretation_rules", raw.get("interpretation_rules", DEFAULT_INTERPRETATION_RULES)
+        )
 
     settings = Settings.model_validate(raw)
     settings.fetcher.storage_state_path = _runtime_path(settings.fetcher.storage_state_path)

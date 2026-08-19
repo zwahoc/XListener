@@ -50,7 +50,30 @@ def test_prompt_treats_post_as_untrusted_data(tmp_path) -> None:
     messages = build_messages(reply_tweet(), settings)
 
     assert "untrusted data" in messages[0]["content"]
-    assert "allowed tags" in messages[0]["content"].lower()
+    assert "model-generated" in messages[0]["content"].lower()
+    assert "fixed vocabulary" in messages[0]["content"].lower()
+
+
+def test_prompt_includes_author_entity_and_reply_first_guidance(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    messages = build_messages(reply_tweet(), settings)
+
+    prompt = messages[1]["content"]
+    assert "Tibo" in prompt
+    assert "Claude Code" in prompt
+    assert "Opus 5" in prompt
+    assert "Codex-CLI" in prompt
+    assert "Strongest overlap with OpenAI" in prompt
+    assert "primary evidence" in prompt.lower()
+    assert "tone" in messages[0]["content"].lower()
+
+
+def test_prompt_includes_learned_preference_guidance(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    messages = build_messages(reply_tweet(), settings, learned_context="LEARNED TAG AFFINITY:\n- reset: +0.80")
+
+    assert "reset: +0.80" in messages[1]["content"]
+    assert "must not override" in messages[1]["content"]
 
 
 async def test_classifier_validates_structured_result_and_normalizes_tags(tmp_path) -> None:
@@ -74,6 +97,24 @@ async def test_classifier_validates_structured_result_and_normalizes_tags(tmp_pa
     assert raw == response
     assert client.calls[0]["think"] is False
     assert isinstance(client.calls[0]["format"], dict)
+
+
+async def test_classifier_accepts_model_generated_tags(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    response = json.dumps(
+        {
+            "relevant": True,
+            "importance": 8,
+            "topic": "Agent workflow",
+            "tags": ["Agent Workflow", "Long-Context Reasoning"],
+            "reason": "The post describes a useful new agent workflow.",
+            "summary": "A new agent workflow is available.",
+        }
+    )
+
+    result, _raw = await OllamaTextClassifier(settings, FakeOllamaClient([response])).classify(reply_tweet())
+
+    assert result.tags == ["agent_workflow", "long_context_reasoning"]
 
 
 async def test_classifier_repairs_invalid_first_response(tmp_path) -> None:
@@ -103,3 +144,70 @@ async def test_classifier_fails_after_two_invalid_responses(tmp_path) -> None:
 
     with pytest.raises(ClassificationError):
         await OllamaTextClassifier(settings, client).classify(reply_tweet())
+
+
+async def test_classifier_repairs_missing_tags(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    missing_tags = json.dumps(
+        {
+            "relevant": False,
+            "importance": 1,
+            "topic": "meme",
+            "reason": "A joke with no practical product information.",
+            "summary": "A reset-related joke.",
+        }
+    )
+    repaired = json.dumps(
+        {
+            "relevant": False,
+            "importance": 1,
+            "topic": "meme",
+            "tags": ["meme", "reset"],
+            "reason": "A joke with no practical product information.",
+            "summary": "A reset-related joke.",
+        }
+    )
+    client = FakeOllamaClient([missing_tags, repaired])
+
+    result, _raw = await OllamaTextClassifier(settings, client).classify(reply_tweet())
+
+    assert result.tags == ["meme", "reset"]
+    assert len(client.calls) == 2
+
+
+async def test_classifier_selectively_verifies_high_risk_reply(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    first = json.dumps(
+        {
+            "relevant": True,
+            "importance": 9,
+            "topic": "Competitor limits",
+            "tags": ["limits", "codex"],
+            "tone": "literal",
+            "stance": "supportive",
+            "reason": "The parent discusses limits.",
+            "summary": "The reply confirms the parent announcement.",
+        }
+    )
+    corrected = json.dumps(
+        {
+            "relevant": False,
+            "importance": 2,
+            "topic": "Routine conversation",
+            "tags": ["conversation", "other"],
+            "tone": "sarcastic",
+            "stance": "uncertain",
+            "reason": "The monitored reply is a short ambiguous reaction and adds no concrete product information.",
+            "summary": "The reply is a brief reaction to the surrounding discussion without a concrete announcement.",
+        }
+    )
+    client = FakeOllamaClient([first, corrected])
+    classifier = OllamaTextClassifier(settings, client)
+
+    result, _raw = await classifier.classify(reply_tweet(), verify=True)
+
+    assert result.importance == 2
+    assert result.tone == "sarcastic"
+    assert len(client.calls) == 2
+    assert classifier.last_trace.verification_used is True
+    assert classifier.last_trace.verification_reason == "short relationship post"

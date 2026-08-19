@@ -6,11 +6,14 @@ import pytest
 
 from xlistener.config import load_settings
 from xlistener.db import SQLiteState
+from xlistener.missed_posts import MissedPostOutcome
 from xlistener.models import ClassificationResult, RelatedPost, Tweet
 from xlistener.notification import (
     NotificationError,
     TelegramFeedbackConsumer,
     TelegramNotifier,
+    normalize_missed_post_url,
+    parse_missed_rating_callback,
     parse_rating_callback,
     rating_keyboard,
     render_notification,
@@ -97,6 +100,9 @@ def test_rating_keyboard_and_callback_parser() -> None:
     assert [button["text"] for row in keyboard["inline_keyboard"] for button in row] == [str(i) for i in range(1, 11)]
     assert parse_rating_callback("rate:100:7") == ("100", 7)
     assert parse_rating_callback("rate:100:11") is None
+    assert parse_missed_rating_callback("miss:abc123:8") == ("abc123", 8)
+    assert normalize_missed_post_url("https://twitter.com/user/status/123?ref_src=test") == "https://x.com/user/status/123"
+    assert normalize_missed_post_url("https://example.com/user/status/123") is None
 
 
 class FakeResponse:
@@ -185,3 +191,99 @@ async def test_feedback_consumer_persists_rating_and_offset(tmp_path) -> None:
         assert (row["rating"], row["telegram_update_id"]) == (9, "50")
         assert db.get_telegram_offset() == 51
         assert client.calls[1][0] == "/answerCallbackQuery"
+
+
+class FakeMissedRecovery:
+    def __init__(self):
+        self.calls = []
+
+    async def process(self, url, rating):
+        self.calls.append((url, rating))
+        return MissedPostOutcome(
+            tweet=tweet().model_copy(update={"url": url}),
+            result=result(),
+            rating=rating,
+        )
+
+
+async def test_feedback_consumer_prompts_then_recovers_link_only_missed_post(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    settings.telegram_bot_token = "token"
+    settings.telegram_chat_id = "123"
+    link = "https://x.com/thsottiaux/status/200"
+    client = FakeTelegramClient(
+        [
+            {"ok": True, "result": [{"update_id": 60, "message": {"chat": {"id": 123}, "text": link}}]},
+            {"ok": True, "result": {"message_id": 1}},
+        ]
+    )
+    recovery = FakeMissedRecovery()
+    with SQLiteState(tmp_path / "state.sqlite3") as db:
+        async with TelegramFeedbackConsumer(settings, db, client=client, missed_recovery=recovery) as consumer:
+            assert await consumer.poll_once() == 1
+
+        request = db.connection.execute("SELECT * FROM pending_missed_posts").fetchone()
+        assert request["url"] == link
+        assert client.calls[1][1]["json"]["text"] == "How useful is this missed post?"
+        callback_data = client.calls[1][1]["json"]["reply_markup"]["inline_keyboard"][1][2]["callback_data"]
+        assert callback_data == f"miss:{request['request_id']}:8"
+
+        callback_client = FakeTelegramClient(
+            [
+                {
+                    "ok": True,
+                    "result": [
+                        {
+                            "update_id": 61,
+                            "callback_query": {
+                                "id": "callback-2",
+                                "data": callback_data,
+                                "message": {"chat": {"id": 123}},
+                            },
+                        }
+                    ],
+                },
+                {"ok": True, "result": True},
+                {"ok": True, "result": {"message_id": 2}},
+                {"ok": True, "result": {"message_id": 3}},
+            ]
+        )
+        async with TelegramFeedbackConsumer(settings, db, client=callback_client, missed_recovery=recovery) as consumer:
+            assert await consumer.poll_once() == 1
+
+        assert recovery.calls == [(link, 8)]
+        assert db.get_missed_post_request(request["request_id"])["status"] == "completed"
+        assert "Processing missed post" in callback_client.calls[2][1]["json"]["text"]
+        assert "Missed post by" in callback_client.calls[3][1]["json"]["text"]
+        assert "Your rating" in callback_client.calls[3][1]["json"]["text"]
+
+
+async def test_missed_post_request_completes_only_after_confirmation_delivery(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    settings.telegram_bot_token = "token"
+    settings.telegram_chat_id = "123"
+    recovery = FakeMissedRecovery()
+    with SQLiteState(tmp_path / "state.sqlite3") as db:
+        db.create_missed_post_request(
+            "request1",
+            "https://x.com/thsottiaux/status/200",
+            "123",
+            "2999-01-01T00:00:00+00:00",
+        )
+        client = FakeTelegramClient(
+            [
+                {"ok": True, "result": True},
+                {"ok": True, "result": {"message_id": 1}},
+                httpx.ReadTimeout("timeout"),
+                httpx.ReadTimeout("timeout"),
+                httpx.ReadTimeout("timeout"),
+            ]
+        )
+        consumer = TelegramFeedbackConsumer(settings, db, client=client, missed_recovery=recovery)
+
+        with pytest.raises(NotificationError, match="failed after 3 attempts"):
+            await consumer._handle_missed_rating("callback", "request1", 8)
+
+        request = db.get_missed_post_request("request1")
+        assert request["status"] == "pending"
+        assert "confirmation delivery" in request["last_error"]

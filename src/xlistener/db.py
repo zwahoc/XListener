@@ -64,6 +64,8 @@ class SQLiteState:
                 importance INTEGER NOT NULL,
                 topic TEXT NOT NULL,
                 tags_json TEXT NOT NULL,
+                tone TEXT NOT NULL DEFAULT 'uncertain',
+                stance TEXT NOT NULL DEFAULT 'uncertain',
                 reason TEXT NOT NULL,
                 summary TEXT NOT NULL,
                 model TEXT NOT NULL,
@@ -101,10 +103,27 @@ class SQLiteState:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pending_missed_posts (
+                request_id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                completed_at TEXT,
+                last_error TEXT
+            );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_tweet_source
             ON feedback(tweet_id, source);
             """
         )
+        analysis_columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(analyses)").fetchall()
+        }
+        if "tone" not in analysis_columns:
+            self.connection.execute("ALTER TABLE analyses ADD COLUMN tone TEXT NOT NULL DEFAULT 'uncertain'")
+        if "stance" not in analysis_columns:
+            self.connection.execute("ALTER TABLE analyses ADD COLUMN stance TEXT NOT NULL DEFAULT 'uncertain'")
         self.connection.commit()
 
     def close(self) -> None:
@@ -195,11 +214,15 @@ class SQLiteState:
     def save_analysis(self, tweet_id: str, result: ClassificationResult, model: str, raw_response: str | None = None) -> None:
         self.connection.execute(
             """
-            INSERT INTO analyses(tweet_id, relevant, importance, topic, tags_json, reason, summary, model, created_at, raw_response)
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO analyses(
+                tweet_id, relevant, importance, topic, tags_json, tone, stance,
+                reason, summary, model, created_at, raw_response
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(tweet_id) DO UPDATE SET
                 relevant=excluded.relevant, importance=excluded.importance, topic=excluded.topic,
-                tags_json=excluded.tags_json, reason=excluded.reason, summary=excluded.summary,
+                tags_json=excluded.tags_json, tone=excluded.tone, stance=excluded.stance,
+                reason=excluded.reason, summary=excluded.summary,
                 model=excluded.model, created_at=excluded.created_at, raw_response=excluded.raw_response
             """,
             (
@@ -208,6 +231,8 @@ class SQLiteState:
                 result.importance,
                 result.topic,
                 json.dumps(result.tags),
+                result.tone,
+                result.stance,
                 result.reason,
                 result.summary,
                 model,
@@ -267,5 +292,40 @@ class SQLiteState:
             ON CONFLICT(key) DO UPDATE SET value=excluded.value
             """,
             (str(offset),),
+        )
+        self.connection.commit()
+
+    def create_missed_post_request(self, request_id: str, url: str, chat_id: str, expires_at: str) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO pending_missed_posts(request_id, url, chat_id, status, created_at, expires_at)
+            VALUES(?, ?, ?, 'pending', ?, ?)
+            """,
+            (request_id, url, chat_id, utc_now(), expires_at),
+        )
+        self.connection.commit()
+
+    def get_missed_post_request(self, request_id: str) -> sqlite3.Row | None:
+        return self.connection.execute(
+            "SELECT * FROM pending_missed_posts WHERE request_id = ?", (request_id,)
+        ).fetchone()
+
+    def complete_missed_post_request(self, request_id: str) -> None:
+        self.connection.execute(
+            "UPDATE pending_missed_posts SET status = 'completed', completed_at = ?, last_error = NULL WHERE request_id = ?",
+            (utc_now(), request_id),
+        )
+        self.connection.commit()
+
+    def fail_missed_post_request(self, request_id: str, error: str) -> None:
+        self.connection.execute(
+            "UPDATE pending_missed_posts SET status = 'pending', last_error = ? WHERE request_id = ?",
+            (error[:500], request_id),
+        )
+        self.connection.commit()
+
+    def prune_missed_post_requests(self) -> None:
+        self.connection.execute(
+            "DELETE FROM pending_missed_posts WHERE expires_at < ? AND status = 'pending'", (utc_now(),)
         )
         self.connection.commit()

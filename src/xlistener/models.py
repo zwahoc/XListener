@@ -6,34 +6,6 @@ from typing import Any, Literal
 from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
 
 
-TAG_VOCABULARY = frozenset(
-    {
-        "codex",
-        "chatgpt",
-        "reset",
-        "quota",
-        "limits",
-        "release",
-        "update",
-        "capability",
-        "safety",
-        "developer_tools",
-        "availability",
-        "api",
-        "model",
-        "integration",
-        "reply",
-        "quote",
-        "repost",
-        "marketing",
-        "meme",
-        "feedback_request",
-        "conversation",
-        "other",
-    }
-)
-
-
 class MediaAsset(BaseModel):
     kind: Literal["image", "video", "gif"]
     url: AnyHttpUrl
@@ -71,7 +43,9 @@ class ClassificationResult(BaseModel):
     relevant: bool
     importance: int = Field(ge=1, le=10)
     topic: str
-    tags: list[str] = Field(default_factory=list, max_length=8)
+    tags: list[str] = Field(min_length=1, max_length=8)
+    tone: Literal["literal", "sarcastic", "humorous", "promotional", "conversational", "critical", "uncertain"] = "uncertain"
+    stance: Literal["supportive", "critical", "neutral", "questioning", "contradictory", "uncertain"] = "uncertain"
     reason: str
     summary: str
 
@@ -86,14 +60,6 @@ class ClassificationResult(BaseModel):
             if tag and tag not in normalized:
                 normalized.append(tag)
         return normalized
-
-    @field_validator("tags")
-    @classmethod
-    def restrict_tags(cls, value: list[str]) -> list[str]:
-        unknown = sorted(set(value) - TAG_VOCABULARY)
-        if unknown:
-            raise ValueError(f"unknown classification tags: {unknown}")
-        return value
 
     @field_validator("topic", "reason", "summary")
     @classmethod

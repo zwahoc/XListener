@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from xlistener.db import SQLiteState
-from xlistener.models import Tweet
+from xlistener.models import ClassificationResult, Tweet
 
 
 def test_processed_ids_are_separate_from_durable_tweets(tmp_path: Path) -> None:
@@ -24,3 +24,23 @@ def test_feedback_updates_without_duplication(tmp_path: Path) -> None:
 
         rows = db.connection.execute("SELECT rating, telegram_update_id FROM feedback").fetchall()
         assert [(row["rating"], row["telegram_update_id"]) for row in rows] == [(9, "11")]
+
+
+def test_analysis_persists_tone_and_stance(tmp_path: Path) -> None:
+    tweet = Tweet(id="1", author_handle="thsottiaux", text="A joke", url="https://x.com/thsottiaux/status/1", source="test")
+    result = ClassificationResult(
+        relevant=False,
+        importance=2,
+        topic="conversation",
+        tags=["conversation"],
+        tone="sarcastic",
+        stance="critical",
+        reason="The post is a sarcastic reaction.",
+        summary="A short reaction without product information.",
+    )
+    with SQLiteState(tmp_path / "state.sqlite3") as db:
+        db.retain_tweet(tweet, "notification")
+        db.save_analysis(tweet.id, result, "qwen3:4b")
+
+        row = db.connection.execute("SELECT tone, stance FROM analyses WHERE tweet_id = '1'").fetchone()
+        assert (row["tone"], row["stance"]) == ("sarcastic", "critical")

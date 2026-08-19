@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 import httpx
@@ -14,6 +15,7 @@ from .classifier import OllamaTextClassifier
 from .config import load_settings
 from .db import SQLiteState
 from .fetchers.playwright_x import PlaywrightXFetcher, XAuthenticationRequired
+from .learning import learned_prompt_context
 from .notification import TelegramFeedbackConsumer, TelegramNotifier, render_notification, should_notify
 from .secrets import get_x_credentials
 
@@ -32,6 +34,7 @@ def _parser() -> argparse.ArgumentParser:
     notify = subparsers.add_parser("notify-latest")
     notify.add_argument("--dry-run", action="store_true")
     subparsers.add_parser("feedback-once")
+    subparsers.add_parser("feedback-listen")
     subparsers.add_parser("db-status")
     return parser
 
@@ -64,24 +67,31 @@ async def _fetch_once(settings, limit: int | None) -> None:
 
 
 async def _classify_latest(settings) -> None:
+    with SQLiteState(settings.runtime.database_path) as db:
+        learned_context = learned_prompt_context(db, settings)
     async with PlaywrightXFetcher(settings) as fetcher:
         tweets = await fetcher.fetch_recent(1)
         if not tweets:
             raise RuntimeError("No posts were returned for classification")
         tweet = await fetcher.enrich_context(tweets[-1])
-    result, raw_response = await OllamaTextClassifier(settings).classify(tweet)
+    classifier = OllamaTextClassifier(settings)
+    result, raw_response = await classifier.classify(tweet, learned_context=learned_context, verify=True)
     print(json.dumps({"tweet": tweet.model_dump(mode="json"), "classification": result.model_dump()}, ensure_ascii=True))
+    print(json.dumps({"llm_trace": classifier.last_trace.__dict__}, ensure_ascii=True))
     if not raw_response:
         raise RuntimeError("Ollama returned an empty classification response")
 
 
 async def _notify_latest(settings, dry_run: bool) -> None:
+    with SQLiteState(settings.runtime.database_path) as db:
+        learned_context = learned_prompt_context(db, settings)
     async with PlaywrightXFetcher(settings) as fetcher:
         tweets = await fetcher.fetch_recent(1)
         if not tweets:
             raise RuntimeError("No posts were returned for notification")
         tweet = await fetcher.enrich_context(tweets[-1])
-    result, _raw_response = await OllamaTextClassifier(settings).classify(tweet)
+    classifier = OllamaTextClassifier(settings)
+    result, _raw_response = await classifier.classify(tweet, learned_context=learned_context, verify=True)
     if not should_notify(result, settings):
         print(
             json.dumps(
@@ -98,6 +108,7 @@ async def _notify_latest(settings, dry_run: bool) -> None:
         return
     if dry_run or settings.runtime.dry_run:
         print(render_notification(tweet, result, model_name=settings.llm.model))
+        print(json.dumps({"llm_trace": classifier.last_trace.__dict__}, ensure_ascii=True))
         return
     with SQLiteState(settings.runtime.database_path) as db:
         db.retain_tweet(tweet, "notification", status="classified")
@@ -105,7 +116,7 @@ async def _notify_latest(settings, dry_run: bool) -> None:
         async with TelegramNotifier(settings) as notifier:
             message_id = await notifier.send(tweet, result)
         db.record_notification(tweet.id, message_id)
-    print(json.dumps({"message_id": message_id, "tweet_id": tweet.id}))
+    print(json.dumps({"message_id": message_id, "tweet_id": tweet.id, "llm_trace": classifier.last_trace.__dict__}))
 
 
 async def _feedback_once(settings) -> None:
@@ -113,6 +124,18 @@ async def _feedback_once(settings) -> None:
         async with TelegramFeedbackConsumer(settings, db) as consumer:
             handled = await consumer.poll_once()
         print(json.dumps({"handled": handled, "next_offset": db.get_telegram_offset()}))
+
+
+async def _feedback_listen(settings) -> None:
+    print("Listening for Telegram ratings and missed-post links. Press Ctrl+C to stop.")
+    with SQLiteState(settings.runtime.database_path) as db:
+        async with TelegramFeedbackConsumer(settings, db) as consumer:
+            while True:
+                try:
+                    await consumer.poll_once(timeout_seconds=25)
+                except (httpx.HTTPError, RuntimeError) as exc:
+                    logging.getLogger(__name__).warning("Telegram listener error: %s", exc)
+                    await asyncio.sleep(5)
 
 
 def _check(settings) -> None:
@@ -136,13 +159,26 @@ def _db_status(settings) -> None:
         durable = db.connection.execute("SELECT COUNT(*) AS count FROM tweets").fetchone()
         notifications = db.connection.execute("SELECT COUNT(*) AS count FROM notifications").fetchone()
         feedback = db.connection.execute("SELECT COUNT(*) AS count FROM feedback").fetchone()
+        pending_missed = db.connection.execute(
+            "SELECT COUNT(*) AS count FROM pending_missed_posts WHERE status = 'pending'"
+        ).fetchone()
+        affinity = db.connection.execute(
+            "SELECT tag, score, sample_count FROM tag_affinity ORDER BY ABS(score) DESC, tag"
+        ).fetchall()
         print(f"Database: {settings.runtime.database_path}")
         print(f"Cursor: {db.get_cursor() or '<unset>'}")
         print(f"Processed-id checkpoints: {row['count']}")
         print(f"Durable tweets: {durable['count']}")
         print(f"Notifications: {notifications['count']}")
         print(f"Feedback ratings: {feedback['count']}")
+        print(f"Pending missed-post requests: {pending_missed['count']}")
         print(f"Telegram update offset: {db.get_telegram_offset()}")
+        if affinity:
+            print("Learned tag affinity:")
+            for item in affinity:
+                print(f"  {item['tag']}: {float(item['score']):+.2f} ({item['sample_count']} rating(s))")
+        else:
+            print("Learned tag affinity: <none>")
 
 
 def main() -> None:
@@ -163,5 +199,10 @@ def main() -> None:
             asyncio.run(_notify_latest(settings, args.dry_run))
         elif args.command == "feedback-once":
             asyncio.run(_feedback_once(settings))
+        elif args.command == "feedback-listen":
+            try:
+                asyncio.run(_feedback_listen(settings))
+            except KeyboardInterrupt:
+                pass
     except XAuthenticationRequired as exc:
         raise SystemExit(f"X authentication needs attention: {exc}") from None
