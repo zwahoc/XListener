@@ -36,6 +36,8 @@ The image/video milestone dependencies can be installed with:
 python -m pip install -e ".[dev,media]"
 ```
 
+The base install also includes `pystray` and `Pillow` for the optional Windows system-tray controller.
+
 `faster-whisper` is installed with GPU support available through the detected NVIDIA device. Whisper model weights are downloaded later when a specific transcription model size is selected for the video milestone.
 
 Runtime data belongs under `%LOCALAPPDATA%\XListener`, not in this repository.
@@ -63,6 +65,7 @@ Phase 1 and Phase 2 diagnostics:
 .\.venv\Scripts\python.exe -m xlistener run
 .\.venv\Scripts\python.exe -m xlistener supervise
 .\.venv\Scripts\python.exe -m xlistener gaming-status
+.\.venv\Scripts\pythonw.exe -m xlistener tray
 ```
 
 `auth-x --manual` opens the dedicated installed-Chrome profile as an ordinary browser process for the one-time login, then verifies and captures the session after you close it. `fetch-once` reuses that persistent profile and falls back to public profile cards where X exposes them; replies may remain unavailable until authentication succeeds. Google Chrome must be installed for the manual bootstrap.
@@ -93,3 +96,5 @@ powershell -ExecutionPolicy Bypass -File scripts/status_xlistener_task.ps1
 ```
 
 The scheduled task starts `xlistener supervise`, waits for games, restarts the daemon after crashes, and runs under your normal interactive Windows account. Remove it with `scripts/remove_xlistener_task.ps1`. The supervisor and daemon use separate rotating logs under `%LOCALAPPDATA%\\XListener`.
+
+The installer also registers `XListener Tray`. It starts the tray controller with `pythonw.exe`, so neither the supervisor nor tray opens a terminal window. The tray menu shows listener status, pauses or resumes monitoring, starts or stops the supervisor, and opens either log file. Exiting the tray icon leaves background monitoring running; use `Stop supervisor` when monitoring itself should stop.

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import subprocess
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -117,6 +119,23 @@ class GamingSupervisor:
         self.unload_models = unload_models
         self.sleep = sleep or __import__("time").sleep
         self.process: ManagedProcess | None = None
+        self._paused = False
+
+    def _write_status(self, games: list[str], paused: bool) -> None:
+        payload = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "daemon_running": self.process is not None and self.process.poll() is None,
+            "daemon_pid": getattr(self.process, "pid", None),
+            "game_running": games,
+            "paused": paused,
+        }
+        path = self.settings.runtime.supervisor_status_path
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        try:
+            temporary.write_text(json.dumps(payload), encoding="utf-8")
+            temporary.replace(path)
+        except OSError as exc:
+            LOG.warning("Could not write supervisor status: %s", exc)
 
     @property
     def command(self) -> list[str]:
@@ -180,22 +199,31 @@ class GamingSupervisor:
 
     def run_forever(self) -> None:
         with InstanceLock(self.settings.runtime.supervisor_lock_path):
-            was_gaming = False
+            was_paused = False
             try:
                 while True:
+                    if self.settings.runtime.shutdown_request_path.exists():
+                        LOG.info("Shutdown requested by tray controller")
+                        break
                     games = self.games_running()
-                    if games:
-                        if not was_gaming:
+                    manually_paused = self.settings.runtime.pause_request_path.exists()
+                    paused = bool(games) or manually_paused
+                    if paused:
+                        if games and not was_paused:
                             LOG.info("Gaming detected: %s", ", ".join(games))
+                        elif manually_paused and not was_paused:
+                            LOG.info("Manual pause requested")
                         self.stop_daemon()
-                        was_gaming = True
+                        was_paused = True
                     else:
-                        if was_gaming:
+                        if was_paused:
                             LOG.info("Gaming ended; waiting %s seconds before restart", self.settings.gaming.restart_delay_seconds)
                             self.sleep(self.settings.gaming.restart_delay_seconds)
                         if self.process is None or self.process.poll() is not None:
                             self.start_daemon()
-                        was_gaming = False
+                        was_paused = False
+                    self._write_status(games, paused)
                     self.sleep(self.settings.gaming.check_interval_seconds)
             finally:
                 self.stop_daemon()
+                self._write_status([], False)

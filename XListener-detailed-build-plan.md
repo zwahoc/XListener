@@ -1113,6 +1113,8 @@ Add setup scripts, scheduled-task registration, log rotation, health checks, and
 
 The gaming-aware supervisor is part of this milestone. It watches configurable executable names, cooperatively pauses the daemon while a game is active, unloads Ollama models, restarts after the configured cooldown, and owns a separate supervisor lock. Task Scheduler starts the supervisor at interactive user logon and restarts it after a crash.
 
+The Windows controller also includes a windowless system-tray process. It is independent from the daemon, exposes manual pause/resume and supervisor controls, and reads a local status file rather than competing for the daemon's locks.
+
 Exit criteria:
 
 - The process starts after login/reboot as designed.

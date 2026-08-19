@@ -21,6 +21,7 @@ from .learning import learned_prompt_context
 from .notification import TelegramFeedbackConsumer, TelegramNotifier, render_notification, should_notify
 from .secrets import get_x_credentials
 from .supervisor import GamingSupervisor, game_processes_running, unload_ollama_models
+from .tray import run_tray
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -43,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("supervise")
     subparsers.add_parser("gaming-status")
     subparsers.add_parser("stop")
+    subparsers.add_parser("tray")
     subparsers.add_parser("db-status")
     return parser
 
@@ -243,6 +245,8 @@ def main() -> None:
             settings.runtime.stop_request_path.touch()
             unloaded = unload_ollama_models(settings) if settings.gaming.unload_ollama_models else []
             print(json.dumps({"stop_requested": True, "unloaded_models": unloaded}))
+        elif args.command == "tray":
+            run_tray(settings)
     except XAuthenticationRequired as exc:
         raise SystemExit(f"X authentication needs attention: {exc}") from None
     except InstanceAlreadyRunning as exc:

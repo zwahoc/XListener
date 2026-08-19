@@ -3,9 +3,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if (-not $task) {
-    Write-Output "'$TaskName' is not registered."
-    exit 1
+foreach ($name in @($TaskName, "XListener Tray")) {
+    $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    if (-not $task) {
+        Write-Output "'$name' is not registered."
+        continue
+    }
+    Write-Output "--- $name ---"
+    Get-ScheduledTaskInfo -TaskName $name | Format-List
 }
-Get-ScheduledTaskInfo -TaskName $TaskName | Format-List

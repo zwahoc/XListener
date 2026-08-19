@@ -14,6 +14,8 @@ def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
     assert settings.fetcher.poll_max_seconds == 90
     assert settings.llm.model == "qwen3:4b"
     assert settings.gaming.processes == ["VALORANT-Win64-Shipping.exe", "VALORANT.exe", "cs2.exe", "LoveChoice.exe"]
+    assert settings.runtime.pause_request_path.name == "pause.request"
+    assert settings.runtime.supervisor_status_path.name == "supervisor-status.json"
     assert settings.author_context["products_of_interest"] == ["Codex", "ChatGPT", "ChatGPT Work", "Codex-CLI"]
     assert len(settings.entity_context) == 11
     assert settings.entity_context[0]["products"] == ["Claude", "Claude Code", "Opus 5", "Fable 5"]

@@ -43,6 +43,9 @@ runtime:
   instance_lock_path: "%LOCALAPPDATA%/XListener/xlistener.lock"
   supervisor_lock_path: "%LOCALAPPDATA%/XListener/supervisor.lock"
   stop_request_path: "%LOCALAPPDATA%/XListener/stop.request"
+  pause_request_path: "%LOCALAPPDATA%/XListener/pause.request"
+  shutdown_request_path: "%LOCALAPPDATA%/XListener/shutdown.request"
+  supervisor_status_path: "%LOCALAPPDATA%/XListener/supervisor-status.json"
   log_level: INFO
   dry_run: false
   retry_base_seconds: 30

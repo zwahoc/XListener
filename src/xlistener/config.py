@@ -205,6 +205,9 @@ class RuntimeConfig(BaseModel):
     instance_lock_path: Path = DEFAULT_RUNTIME_DIR / "xlistener.lock"
     supervisor_lock_path: Path = DEFAULT_RUNTIME_DIR / "supervisor.lock"
     stop_request_path: Path = DEFAULT_RUNTIME_DIR / "stop.request"
+    pause_request_path: Path = DEFAULT_RUNTIME_DIR / "pause.request"
+    shutdown_request_path: Path = DEFAULT_RUNTIME_DIR / "shutdown.request"
+    supervisor_status_path: Path = DEFAULT_RUNTIME_DIR / "supervisor-status.json"
     log_level: str = "INFO"
     dry_run: bool = False
     retry_base_seconds: int = Field(default=30, ge=1)
@@ -273,6 +276,9 @@ class Settings(BaseModel):
         self.runtime.instance_lock_path.parent.mkdir(parents=True, exist_ok=True)
         self.runtime.supervisor_lock_path.parent.mkdir(parents=True, exist_ok=True)
         self.runtime.stop_request_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.pause_request_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.shutdown_request_path.parent.mkdir(parents=True, exist_ok=True)
+        self.runtime.supervisor_status_path.parent.mkdir(parents=True, exist_ok=True)
         self.fetcher.storage_state_path.parent.mkdir(parents=True, exist_ok=True)
         self.fetcher.browser_profile_path.mkdir(parents=True, exist_ok=True)
 
@@ -325,6 +331,9 @@ def load_settings(
     settings.runtime.instance_lock_path = _runtime_path(settings.runtime.instance_lock_path)
     settings.runtime.supervisor_lock_path = _runtime_path(settings.runtime.supervisor_lock_path)
     settings.runtime.stop_request_path = _runtime_path(settings.runtime.stop_request_path)
+    settings.runtime.pause_request_path = _runtime_path(settings.runtime.pause_request_path)
+    settings.runtime.shutdown_request_path = _runtime_path(settings.runtime.shutdown_request_path)
+    settings.runtime.supervisor_status_path = _runtime_path(settings.runtime.supervisor_status_path)
     settings.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     settings.telegram_chat_id = os.getenv(settings.notification.chat_id_env)
     settings.ensure_runtime_dirs()
