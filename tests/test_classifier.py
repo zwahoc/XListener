@@ -64,8 +64,35 @@ def test_prompt_includes_author_entity_and_reply_first_guidance(tmp_path) -> Non
     assert "Opus 5" in prompt
     assert "Codex-CLI" in prompt
     assert "Strongest overlap with OpenAI" in prompt
+    assert "@claudedevs" in prompt
     assert "primary evidence" in prompt.lower()
     assert "tone" in messages[0]["content"].lower()
+
+
+def test_context_bundle_resolves_related_author_to_known_entity(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    tweet = Tweet(
+        id="100",
+        author_handle="thsottiaux",
+        text="Do not worry, we have compute",
+        url="https://x.com/thsottiaux/status/100",
+        is_reply=True,
+        related_posts=[
+            RelatedPost(
+                relationship="reply_parent",
+                author_handle="claudedevs",
+                text="We are extending Claude Code limits.",
+                url="https://x.com/claudedevs/status/90",
+            )
+        ],
+        source="test",
+    )
+
+    bundle = build_context_bundle(tweet, settings)
+
+    assert "author: @claudedevs" in bundle
+    assert "known_entity: Anthropic" in bundle
+    assert "known_entity_products: Claude, Claude Code, Opus 5, Fable 5" in bundle
 
 
 def test_prompt_includes_learned_preference_guidance(tmp_path) -> None:

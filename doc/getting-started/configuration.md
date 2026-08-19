@@ -19,6 +19,8 @@ Copy the tracked examples to local files:
 - config.yaml controls runtime, provider, polling, notification, and gaming behavior.
 - preferences.yaml controls interests, ignored content, author context, competitor glossary, and interpretation rules.
 
+Each entity_context entry may include handles, such as claudedevs and claudeai for Anthropic. When a related post author matches one of these aliases, the classifier receives the resolved organization, relationship, and product list directly inside the relationship context block.
+
 The examples contain the current Codex-focused profile. The monitored author context identifies Tibo as an OpenAI employee and treats the monitored text as primary evidence when it is a reply or repost.
 
 ## Important Settings

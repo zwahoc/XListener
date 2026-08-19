@@ -50,6 +50,8 @@ config.py loads YAML, .env, and platform defaults into Pydantic settings. X_MONI
 
 PlaywrightXFetcher owns the persistent Chrome profile, authenticated session bootstrap, profile-page parsing, and post retrieval. It extracts original posts, replies, reposts, quoted posts, timestamps, and available media metadata. ContextResolver hydrates a bounded relationship graph so a reply is interpreted with its parent or quoted post without crawling an entire thread.
 
+Relationship blocks are enriched with configured author aliases when available. For example, `@claudedevs` is labeled as Anthropic and associated with Claude products before the prompt reaches Ollama. This identifies the subject without attributing the related author's claims to the monitored author.
+
 The fetcher is an adapter boundary. X DOM and session behavior can change without forcing changes to persistence, classification, or Telegram delivery.
 
 ### Text daemon
