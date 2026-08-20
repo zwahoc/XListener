@@ -1,26 +1,44 @@
 # Notification Format
 
-Notifications are deliberately informative without duplicating the entire tweet. The original post remains one tap away through View tweet.
+XListener notifications are designed to be useful without duplicating the entire original post. Every delivered message includes a direct link to the source on X.
 
-~~~text
-Original post by @thsottiaux
+## Message Contents
+
+```text
+Original post by @account
 
 Summary
-<complete model summary>
+<model-generated summary>
 
-Reasoning from qwen3:8b
-<narrative model reasoning>
+Reasoning from <model>
+<model-generated reason>
 
-Importance: 9/10
-Tags: codex, reset, release
+Importance: 8/10
+Tags: release, codex, limits
 
-Timestamp
-Posted: 19 Aug 2026, 02:36 PM MYT
-Notified: 19 Aug 2026, 08:38 PM MYT
+Posted: 21 Aug 2026, 02:36 PM MYT
+Notified: 21 Aug 2026, 02:38 PM MYT
 
-View tweet
-~~~
+View post
+```
 
-Replies and reposts use relationship-specific opening lines, for example Replied by @thsottiaux to @user or Repost by @thsottiaux from @user. Missed-post results use Missed post by @thsottiaux and include the user's rating alongside model importance.
+The opening line changes with the relationship type, for example:
 
-The renderer escapes HTML, clips long model fields, and enforces Telegram's 4096-character message limit. Tags come from the model and are normalized to lowercase underscore identifiers; the application does not impose a fixed tag vocabulary.
+- `Replied by @account to @other_account`
+- `Repost by @account from @other_account`
+- `Missed post by @account`
+
+Missed-post results also display the rating supplied during recovery.
+
+## Ratings
+
+Every normal notification includes inline buttons from 1 to 10.
+
+- `1` means irrelevant or unwanted.
+- `10` means very useful.
+
+XListener stores the rating locally and uses it to update its bounded tag-affinity profile when learning is enabled. A rating records feedback for future decisions; it does not alter the original model decision or post content.
+
+## Rendering Guarantees
+
+The renderer escapes model and post text for Telegram HTML, clips individual fields, and enforces Telegram's message-length limit. Tags are model-generated, normalized to lowercase underscore identifiers, deduplicated, and limited by the classification schema; there is no fixed tag catalog.

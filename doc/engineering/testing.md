@@ -1,41 +1,41 @@
 # Testing and Verification
 
-## Automated Tests
+XListener includes automated coverage for its core behavior, but the supported deployment is Windows 11. This repository has not been validated on macOS or Linux, and automated tests cannot guarantee that X's browser experience or authentication behavior will remain stable.
 
-The repository currently has 47 pytest tests covering:
+## Automated Coverage
 
-- YAML, environment overrides, and default validation;
-- Pydantic model bounds and model-generated tag normalization;
-- HTML-safe Telegram rendering and 4096-character limits;
-- SQLite retention, cursor, deduplication, retries, feedback, and learning;
-- reply, quote, repost, and nested context hydration;
-- Playwright parser fixtures and relationship extraction;
-- malformed model responses and selective verification;
-- Telegram callback and missed-post flows;
-- daemon baseline, retry, cursor, and instance-lock behavior;
-- gaming process detection, supervisor lifecycle, and tray controls.
+The test suite covers:
 
-Run the suite with:
+- configuration defaults, YAML parsing, environment overrides, and validation;
+- post and classification model constraints;
+- X profile parser fixtures and relationship extraction;
+- parent, quote, repost, and nested-context hydration;
+- structured Ollama response handling and selective verification;
+- SQLite retention, deduplication, cursors, retries, feedback, and tag affinity;
+- Telegram rendering, message limits, callbacks, and missed-post workflows;
+- daemon baseline behavior, retry flow, and instance locking;
+- game-process detection, supervisor lifecycle, and tray controls.
 
-~~~powershell
+Run the suite on a supported Windows environment:
+
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-~~~
+```
 
-## Manual Acceptance Checks
+## Windows Deployment Checks
 
-Before treating a deployment as stable, verify:
+Before relying on an installation, verify the following on the target Windows machine:
 
-1. Initial baseline does not notify old profile content.
-2. A relevant new post produces exactly one Telegram message.
-3. A reply includes enough parent or quote context for interpretation.
-4. A low-importance post is not retained beyond its checkpoint.
-5. A Telegram rating is acknowledged and persisted.
-6. A missed-post link asks for a rating before X or Ollama work.
-7. Stopping Ollama creates retryable work rather than data loss.
-8. Windows logon starts the supervisor and tray without a console.
-9. Starting a configured game pauses the daemon and unloading occurs.
-10. Closing the game restarts the daemon after the configured cooldown.
+1. `xlistener check` can reach Ollama, detect Telegram configuration, launch Chrome, and find a saved X session after authentication.
+2. First-run baseline behavior does not notify existing profile content.
+3. A relevant new post produces one Telegram message with the expected context and link.
+4. A low-importance post is discarded after its deduplication checkpoint is recorded.
+5. A rating is acknowledged in Telegram and appears in `xlistener db-status`.
+6. A missed-post link asks for a rating before X fetching or model inference begins.
+7. A stopped Ollama service creates retryable work rather than losing the post.
+8. Sign-in starts the supervisor and tray controller without console windows.
+9. A configured game pauses the daemon, and ending the game resumes it after the configured delay.
 
-## Live Test Limits
+## Practical Limits
 
-Automated tests do not prove that X will keep its DOM stable, that a session will never be challenged, or that the local model will always judge a subtle post correctly. A 24-hour soak test and periodic review of false positives and missed-post recoveries remain part of operational acceptance.
+Use a soak period after changing configuration, upgrading Chrome or Playwright, or reauthenticating X. Watch for false positives, missed-post recoveries, session challenges, and unexpected restart behavior. Model judgment is probabilistic; treat notification ratings and operational logs as feedback tools, not proof of correctness.

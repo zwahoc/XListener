@@ -1,58 +1,66 @@
 # Runtime and Data
 
-## Runtime Directory
+XListener keeps runtime state outside the repository. On Windows, the default location is `%LOCALAPPDATA%\XListener\`.
 
-Windows runtime data is stored outside the repository:
+## Runtime Files
 
-~~~text
+```text
 %LOCALAPPDATA%\XListener\
-  xlistener.sqlite3
-  xlistener.log
-  supervisor.log
-  xlistener.lock
-  supervisor.lock
-  stop.request
-  pause.request
-  shutdown.request
-  supervisor-status.json
-  browser\chrome-profile\
-  secrets\x_storage.json
-~~~
+├── xlistener.sqlite3
+├── xlistener.log
+├── supervisor.log
+├── supervisor-status.json
+├── xlistener.lock
+├── supervisor.lock
+├── stop.request
+├── pause.request
+├── shutdown.request
+├── browser\chrome-profile\
+└── secrets\x_storage.json
+```
 
-The exact paths can be overridden in config.yaml; environment expansion is supported.
+Paths can be overridden in `config.yaml`; environment variables in path values are expanded during configuration loading. Treat the whole directory as local application data: it can contain browser-session material, classification results, and notification history.
 
-## SQLite Retention Model
+## SQLite State
 
-The state database contains:
+The SQLite database provides durable, restart-safe state:
 
-- app_state: the last-seen cursor;
-- processed_ids: bounded, expiring checkpoints for deduplication;
-- tweets: retained qualifying, failed, or user-submitted posts;
-- analyses: structured model decisions;
-- notifications: confirmed Telegram deliveries;
-- feedback: user ratings;
-- tag_affinity and learned_profile_versions: current and historical learning summaries;
-- telegram_state: the getUpdates offset;
-- pending_missed_posts: link submissions awaiting a rating or completion.
+| Data | Purpose |
+|---|---|
+| `app_state` | Cursor for the latest safely observed X post. |
+| `processed_ids` | Bounded, expiring deduplication checkpoints. |
+| `tweets` | Qualifying, failed, and user-submitted post records. |
+| `analyses` | Validated model decisions and raw model responses for retained posts. |
+| `notifications` | Confirmed Telegram delivery records. |
+| `feedback` | Inline usefulness ratings. |
+| `tag_affinity` and `learned_profile_versions` | Local preference-learning summaries and history. |
+| `telegram_state` | Telegram `getUpdates` offset. |
+| `pending_missed_posts` | Status-link requests awaiting a rating or completion. |
 
-Ignored posts are removed after classification. Only their ID and outcome remain in the expiring checkpoint table. This is a deliberate resource and privacy boundary, not an accidental lack of history.
+Ignored posts are not archived. After a non-qualifying decision, XListener records only the post ID and outcome in `processed_ids`, subject to the configured time and row limits. This is an intentional privacy and storage boundary.
 
-## Processing States
+## Processing and Retry Lifecycle
 
-~~~text
-discovered -> classified -> notified
-     |            |
-     +--------> failed -> retry
-ignored -> expiring processed-id checkpoint
-user_submitted_missed -> classified -> notified
-~~~
+```text
+new post → context → classification ──→ ignored checkpoint
+                       │
+                       └──→ retained post → Telegram notification → confirmed delivery
+                                      │
+                                      └──→ failure → scheduled retry
+```
 
-A qualifying post is persisted before Telegram delivery. If Telegram fails after classification, the saved analysis is reused on retry. Cursor advancement is delayed until each fetched candidate reaches a safe terminal or durable retry state.
+Qualifying posts are persisted before delivery. If Telegram fails, the next attempt reuses the saved classification. Failed classification or context work is also retained so it can be retried with exponential backoff. The cursor advances after fetched work has reached a safe terminal outcome or durable retry state.
 
 ## Locks and Control Markers
 
-The daemon and supervisor use separate non-blocking file locks. The stop watcher observes stop.request; the tray and supervisor use pause.request and shutdown.request for cooperative lifecycle control. Marker files are local signals and contain no secrets.
+The daemon and supervisor use separate non-blocking locks to prevent duplicate instances. Local marker files coordinate lifecycle requests:
 
-## Logs
+- `stop.request` asks the daemon to stop cooperatively.
+- `pause.request` tells the supervisor to keep monitoring paused.
+- `shutdown.request` asks the supervisor to exit.
 
-Logs rotate at approximately 5 MB with three backups. Request-library loggers are reduced to warning level so Telegram bot URLs, which may contain the bot token, are not emitted as normal request traces.
+`supervisor-status.json` is an atomically replaced snapshot used by the tray menu. These control files contain no secrets.
+
+## Logging
+
+Both application logs use rotating files: approximately 5 MB per file with three backups. The application reduces HTTP client logging to warning level to avoid normal request traces that could expose bot-token URLs.

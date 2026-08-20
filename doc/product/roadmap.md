@@ -1,41 +1,43 @@
 # Roadmap
 
-## Current Release: Goal 1A Text Listener
+The current product is a text-first personal monitor. Future work extends media understanding and operational maturity without changing the local-first, single-user focus.
 
-The text pipeline is complete enough for continuous personal use. Remaining work is operational confidence: a 24-hour soak, logout/reboot verification, and occasional review of missed-post recoveries and false positives.
+## Next: Image Understanding
 
-## Next: Goal 2 Image Understanding
+Planned work includes:
 
-Planned work:
+1. Downloading direct and related-post images with size, MIME-type, and timeout limits.
+2. Routing image-bearing context to the configured local vision model.
+3. Preserving alt text and providing a text-only fallback when media is unavailable.
+4. Keeping downloaded media temporary and removing it after classification.
+5. Adding fixtures and Windows acceptance checks for image-led posts.
 
-1. Download direct, quoted, and parent images with size, MIME, and timeout limits.
-2. Route image-bearing context to qwen3-vl:4b.
-3. Include alt text and a text-only fallback when an image is unavailable.
-4. Keep image files temporary and clean them after classification.
-5. Add fixture and manual acceptance tests for image-only information.
+Success means a post whose important information is primarily in an image can be assessed with its relationship context intact.
 
-Success means a reply whose meaning exists primarily in an attached image can be classified with the relationship context intact.
+## Then: Video and Audio Understanding
 
-## Then: Goal 3 Video Understanding
+Planned work includes:
 
-Planned work:
+1. Discovering and downloading bounded video assets.
+2. Extracting audio with FFmpeg.
+3. Transcribing speech with a local faster-whisper model.
+4. Sampling frames for visible text and visual context.
+5. Combining media observations with post text and related-post context.
+6. Degrading safely for missing, oversized, silent, or unsupported media.
 
-1. Detect and download bounded video assets.
-2. Extract audio with FFmpeg.
-3. Transcribe spoken content with a local faster-whisper model.
-4. Sample frames for screen text and visual context.
-5. Combine transcript, sampled-frame observations, post text, and nested context.
-6. Degrade safely when media is unavailable, oversized, silent, or unsupported.
+## Operational Maturity
 
-## Later Enhancements
+Near-term validation work includes Windows soak testing, reboot and sign-in checks, session-expiry recovery, and review of false positives and missed-post recoveries.
+
+## Later Opportunities
 
 - Broader feedback-based preference learning beyond tag affinity.
-- Historical backfill when a reliable source adapter exists.
-- Optional RSS/Nitter adapters behind the fetcher contract.
-- Better event clustering across related posts.
-- A read-only local dashboard for diagnostics and review.
-- Cross-platform service wrappers after Windows operation is stable.
+- Historical backfill when a reliable ingestion source is available.
+- Optional RSS or alternative fetcher adapters behind the existing boundary.
+- Event clustering across related posts.
+- A read-only local diagnostics and review interface.
+- Cross-platform service wrappers after Windows operation is proven stable.
 
-## Explicitly Deferred
+## Out of Scope for the Current Direction
 
-The project will not add a paid X API, cloud LLM calls, CAPTCHA automation, or a full archive of every ignored post as part of the current roadmap.
+The roadmap does not include paid X API dependence, cloud LLM processing, automated CAPTCHA handling, or a full archive of ignored posts.

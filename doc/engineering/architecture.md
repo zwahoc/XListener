@@ -1,106 +1,83 @@
 # Architecture
 
-## Design Goals
+XListener is a small, single-user Windows service. Its architecture prioritizes local inference, durable delivery, clear retention boundaries, and replaceable X ingestion rather than scale or multi-tenant features.
 
-XListener is intentionally a small local daemon rather than a hosted platform. The design optimizes for:
+## System Overview
 
-- one monitored X account;
-- local inference with no cloud LLM dependency;
-- durable recovery after process, network, Telegram, or Ollama failures;
-- explicit control over what content is retained;
-- replaceable provider boundaries when X changes its web interface.
+```text
+Windows Task Scheduler
+          │
+          ▼
+  GamingSupervisor ────────────────► system tray
+          │                              │
+          ▼                              │ status and controls
+      TextDaemon ◄───────────────────────┘
+       │    │    │
+       │    │    └────────────► Telegram Bot API
+       │    └──────────────────► Ollama on localhost
+       └───────────────────────► authenticated X session
+                         │
+                         ▼
+                    SQLite state
+```
 
-## System Boundary
+The daemon owns polling, durable state, classification, delivery, and Telegram feedback. The supervisor owns the daemon process lifecycle. The tray controller uses local marker and status files; it does not access the application database or daemon lock directly.
 
-~~~text
-                         +----------------------+
-                         | Windows Task Scheduler|
-                         +----------+-----------+
-                                    |
-                            +-------v--------+
-                            | GamingSupervisor|
-                            +---+--------+---+
-                                |        |
-                       pause/stop|        |status
-                                |        v
-                       +--------v--+  tray.py
-                       | TextDaemon |
-                       +-----+------+
-                             |
-           +-----------------+------------------+
-           |                 |                  |
-    PlaywrightXFetcher  OllamaTextClassifier  Telegram
-           |                 |                  |
-           v                 v                  v
-           X web         qwen3:8b          Bot API / chat
-           |
-           v
-       SQLiteState
-~~~
-
-The arrows represent application contracts, not shared database access. The daemon owns the polling and feedback loops; the supervisor owns the daemon process lifecycle; the tray only writes control markers and reads a status file.
-
-## Components
+## Main Components
 
 ### Configuration
 
-config.py loads YAML, .env, and platform defaults into Pydantic settings. X_MONITORED_HANDLE is an environment override so the tracked repository never dictates the local account. Runtime paths are expanded into the Windows local application data directory.
+`config.py` merges local YAML configuration, `.env` values, and safe defaults into validated Pydantic settings. `X_MONITORED_HANDLE` overrides the YAML account, allowing the tracked repository to remain independent of a local monitoring target. Runtime paths default to `%LOCALAPPDATA%\XListener\` on Windows.
 
-### X fetcher
+### X Fetcher and Context Resolver
 
-PlaywrightXFetcher owns the persistent Chrome profile, authenticated session bootstrap, profile-page parsing, and post retrieval. It extracts original posts, replies, reposts, quoted posts, timestamps, and available media metadata. ContextResolver hydrates a bounded relationship graph so a reply is interpreted with its parent or quoted post without crawling an entire thread.
+`PlaywrightXFetcher` owns a dedicated persistent Chrome profile, manual authentication, session reuse, profile-page parsing, and retrieval of a bounded recent window. It identifies original posts, replies, reposts, quoted posts, timestamps, and available media metadata.
 
-Relationship blocks are enriched with configured author aliases when available. For example, `@claudedevs` is labeled as Anthropic and associated with Claude products before the prompt reaches Ollama. This identifies the subject without attributing the related author's claims to the monitored author.
+`ContextResolver` enriches a post with bounded parent, quote, and repost context. Configured entity aliases can clarify the subject of a related post, but the classifier is instructed to treat the monitored account's text as the primary evidence.
 
-The fetcher is an adapter boundary. X DOM and session behavior can change without forcing changes to persistence, classification, or Telegram delivery.
+The fetcher is an adapter boundary. X page or session changes should be isolated to this layer rather than changing persistence, classification, or Telegram delivery.
 
-### Text daemon
+### Text Daemon
 
-TextDaemon runs one serialized polling work lock:
+Each polling cycle is serialized by a work lock:
 
-1. retry due durable failures;
-2. fetch a bounded recent window;
-3. compare IDs with the SQLite cursor and deduplication table;
-4. hydrate reply, quote, and repost context;
-5. classify unseen posts oldest-first;
-6. discard ignored content after recording only an expiring ID checkpoint;
-7. retain qualifying content before sending it;
-8. deliver Telegram notifications and record confirmed message IDs;
-9. advance the cursor only after safe outcomes are recorded;
-10. wait a fresh random delay between 10 and 90 seconds.
+1. Retry due durable failures.
+2. Fetch and order a bounded window of recent posts.
+3. Establish a first-run baseline or identify posts newer than the cursor.
+4. Enrich unseen posts with relationship context.
+5. Classify each candidate and apply the delivery threshold.
+6. Retain qualifying or failed work; discard ignored content after recording an expiring ID checkpoint.
+7. Deliver qualifying notifications and record confirmed Telegram message IDs.
+8. Advance the cursor and prune old checkpoints.
 
-Telegram updates are consumed concurrently with X polling. A shared work lock prevents a missed-post request from mutating the same state while a normal tweet is being processed.
+Telegram feedback polling runs alongside X polling. A shared work lock ensures a user-submitted missed-post request cannot alter the same state while normal processing is in progress.
 
-### Classifier
+### Local Classifier
 
-OllamaTextClassifier builds a structured prompt from:
+`OllamaTextClassifier` builds a structured prompt from local preferences, monitored-author context, related-post context, interpretation rules, learned tag affinity, and a bounded set of rated examples. The local model returns a Pydantic-validated `ClassificationResult` containing relevance, importance, summary, reason, tags, tone, and stance.
 
-- the monitored author profile;
-- the four products of interest;
-- interest priorities and ignore guidance;
-- an 11-organization competitor glossary;
-- explicit reply-first and tone/stance rules;
-- learned tag affinity and bounded rated examples.
+A selective verification pass is used for high-risk short relationship posts that receive unexpectedly high scores. It can correct or reduce a first-pass result; it does not perform web research.
 
-The model returns a Pydantic-validated ClassificationResult with relevance, importance, topic, model-generated tags, tone, stance, summary, and narrative reasoning. High-risk short replies with an unexpectedly high score receive a selective second pass for skepticism. The verifier may lower or correct the first result; it does not perform web search.
+### Telegram Integration
 
-### Telegram
+`TelegramNotifier` renders an HTML-safe, length-bounded message and attaches 1–10 rating buttons. `TelegramFeedbackConsumer` uses Telegram long polling with a durable update offset to record ratings and accept missed-post links.
 
-TelegramNotifier renders an HTML-safe, length-bounded message and attaches inline ratings from 1 to 10. TelegramFeedbackConsumer uses long polling with a durable update offset. The same consumer accepts a status link as a missed-post report, asks for a rating, then fetches and classifies only that submitted post.
+For a missed post, XListener requests a rating first. Only after the rating is supplied does it fetch, classify, and persist the linked post.
 
-### Supervisor and tray
+### Supervisor and Tray
 
-GamingSupervisor detects configured process names using Windows tasklist. It stops the daemon cooperatively, unloads the configured Ollama models, and restarts after a cooldown when gaming ends. It also recovers from daemon crashes.
+`GamingSupervisor` detects configured executable names with Windows `tasklist`. It starts the daemon, stops it cooperatively while a configured game is active or a manual pause is requested, optionally unloads Ollama models, and restarts after a cooldown. It also records small status snapshots for the tray controller.
 
-tray.py is a separate pystray process. It never owns the daemon lock or database connection. Pause, shutdown, and resume are communicated through marker files; current state is published as a small JSON status file.
+`tray.py` provides local pause, resume, supervisor, and log controls through `pystray`. It communicates through marker files and does not own the application process.
 
-## Failure Isolation
+## Failure Handling
 
-Failures are scoped to the smallest possible unit:
+Failures are contained at the smallest practical boundary:
 
-- a malformed post does not stop the polling loop;
-- an Ollama failure creates retryable durable work;
-- a Telegram failure reuses saved analysis instead of invoking Ollama again;
-- an expired X session enters an authentication cooldown;
-- a crashed daemon is restarted by the supervisor or Task Scheduler;
-- ignored content is not retained merely to make recovery possible later.
+- A malformed or unclassifiable post becomes retryable durable work instead of stopping the service.
+- Failed Telegram delivery reuses saved analysis; it does not call Ollama again.
+- An unavailable X session enters the configured authentication cooldown.
+- The supervisor can restart a crashed daemon.
+- Ignored post content is intentionally not retained solely to make later recovery possible.
+
+See [Runtime and data](runtime-and-data.md) for storage and retention details.

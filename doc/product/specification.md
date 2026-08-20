@@ -2,54 +2,56 @@
 
 ## Product Statement
 
-XListener watches a configurable X account and alerts one user only when a local language model determines that a post is relevant enough to matter. It is designed for high-signal personal monitoring, not analytics, archiving, or multi-user publishing.
+XListener watches one configurable X account and sends a private Telegram alert only when a local language model judges a new post relevant enough to matter. It is a personal, Windows-focused monitoring tool—not an analytics platform, public archive, or multi-user service.
 
-## Primary User
+## Intended User
 
-The initial user follows an OpenAI employee account for Codex and ChatGPT updates, usage-limit changes, releases, capability announcements, and meaningful replies. The user prefers model judgment over a brittle keyword list and provides explicit 1-10 usefulness ratings to improve tag affinity.
+The primary user follows an account that occasionally posts product, developer, or strategic updates. They want high-signal alerts shaped by natural-language preferences instead of a brittle keyword list, and they can rate notifications to refine local tag affinity over time.
 
-## Functional Requirements
+## Functional Behavior
 
-### Ingestion
+### Ingestion and Context
 
-- Monitor one account selected through configuration.
-- Include authored originals, replies, and reposts by default.
-- Retrieve bounded parent, quoted, and reposted context.
-- Preserve the monitored author's post as primary evidence.
-- Use a persistent authenticated browser profile.
+- Monitor one configured account through a dedicated authenticated Chrome profile.
+- Fetch a bounded recent window of original posts, replies, and reposts.
+- Include bounded parent, quote, and repost context where available.
+- Treat the monitored account's own text as the primary evidence.
+- Establish a first-run baseline by default to avoid notifying existing posts.
 
-### Interpretation
+### Classification
 
 - Use a local Ollama text model.
-- Return schema-validated relevance and importance from 1 to 10.
-- Generate normalized tags, narrative reasoning, summary, tone, and stance.
-- Apply the configured minimum importance threshold outside the model.
-- Use a skeptical second pass only for selected high-risk relationship posts.
+- Return schema-validated relevance, importance (1–10), summary, reason, tags, tone, and stance.
+- Apply the configured minimum importance threshold outside the model response.
+- Use a selective verification pass for qualifying high-risk short relationship posts.
+- Include local preferences, author context, entity context, and learned tag affinity in the decision process.
 
-### Notification
+### Notification and Feedback
 
-- Send only qualifying posts to the configured private Telegram chat.
-- Include relationship line, complete summary, model reasoning, importance, tags, timestamps, and original link.
+- Deliver qualifying posts to one configured private Telegram chat.
+- Include relationship context, summary, reasoning, importance, tags, timestamps, and a source link.
 - Offer inline ratings from 1 (irrelevant) to 10 (very useful).
+- Store feedback locally and update bounded tag affinity when enabled.
 
-### Recovery and Learning
+### Recovery and Reliability
 
-- Accept a single status URL as a missed-post report.
-- Ask for the user's rating before fetching and classifying it.
-- Retain notified, failed, and user-submitted items; discard ignored content after checkpointing its ID.
-- Update bounded tag affinity from ratings.
+- Accept a single X or Twitter status link as a missed-post report.
+- Ask for a rating before fetching or classifying the submitted post.
+- Retain qualifying, failed, and user-submitted work in SQLite.
+- Discard ignored post content after recording a bounded deduplication checkpoint.
+- Retry failures with bounded exponential backoff and avoid reclassifying an already saved decision for delivery retries.
 
-### Operations
+### Windows Operation
 
-- Poll with a random 10-90 second delay.
-- Retry failures with bounded exponential backoff.
-- Start at user logon, pause for configured games, and expose tray controls.
-- Keep running after an individual post, model, network, or Telegram failure.
+- Poll using a randomized configurable interval.
+- Run under a Windows scheduled-task supervisor at user sign-in.
+- Pause while configured game processes are active and optionally unload local models.
+- Provide a Windows tray controller for status, pause/resume, supervisor control, and logs.
 
 ## Non-Goals
 
-The current product does not promise multi-account monitoring, a web dashboard, official paid X API integration, cloud inference, full ignored-post search, CAPTCHA solving, image understanding, video transcription, or automatic semantic event clustering.
+The current product does not provide multi-account monitoring, multi-user collaboration, a web dashboard, paid X API integration, cloud inference, a searchable archive of ignored posts, CAPTCHA automation, image understanding, video transcription, or event clustering.
 
 ## Acceptance Standard
 
-The text milestone is considered usable when a new relevant post can travel from X through context hydration and local classification to exactly one Telegram notification, while restarts and provider failures preserve enough durable state to avoid silent loss or duplicate processing.
+On a supported Windows deployment, a new relevant post should travel from X retrieval through bounded context and local classification to exactly one Telegram notification. Provider interruptions and restarts should preserve enough local state to avoid silent loss and unnecessary duplicate processing.

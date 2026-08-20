@@ -1,42 +1,42 @@
 # Technology Stack
 
-## Runtime
+XListener uses a deliberately compact Windows-oriented stack. The goal is a local, understandable personal service rather than a distributed platform.
 
 | Layer | Technology | Role |
 |---|---|---|
-| Language | Python 3.11-3.14 | Application runtime |
-| Async runtime | asyncio and TaskGroup | Concurrent polling and Telegram handling |
-| Configuration | Pydantic 2, PyYAML, python-dotenv | Validated settings and local overrides |
-| Browser access | Playwright for Python with installed Google Chrome | Authenticated X retrieval |
-| Persistence | SQLite via the standard library | Cursor, dedupe, durable work, feedback, and learned tag affinity |
-| Local inference | Ollama HTTP/Python client | Text classification with qwen3:8b |
-| Notifications | Telegram Bot API through httpx | Private-chat delivery and inline feedback |
-| Secrets | keyring and Windows Credential Manager | X username/password storage |
-| Windows lifecycle | Task Scheduler and pythonw.exe | User-logon startup without a console |
-| Tray UI | pystray and Pillow | Status and lifecycle controls |
-| Test runner | pytest and pytest-asyncio | Unit and async integration tests |
+| Application | Python 3.11–3.14 | Core runtime and CLI. |
+| Concurrency | `asyncio` and `TaskGroup` | X polling and Telegram feedback handling. |
+| Configuration | Pydantic, PyYAML, python-dotenv | Validated local configuration and environment overrides. |
+| X access | Playwright with Google Chrome | Dedicated authenticated browser session and page parsing. |
+| Persistence | SQLite | Cursor, deduplication, retries, retained records, feedback, and learning state. |
+| Local inference | Ollama and `qwen3:8b` | Structured text classification on the local machine. |
+| Notifications | Telegram Bot API via httpx | Private delivery, ratings, and missed-post requests. |
+| Credential storage | keyring / Windows Credential Manager | X username and password storage. |
+| Windows lifecycle | Task Scheduler and `pythonw.exe` | User-logon startup without a console window. |
+| Tray interface | pystray and Pillow | Local service controls and status. |
+| Testing | pytest and pytest-asyncio | Unit and async behavior coverage. |
 
-## Deliberate Non-Choices
+## Deliberate Constraints
 
-- No paid X API dependency in the text milestone.
-- No cloud LLM or hosted database.
-- No web dashboard, Redis, Celery, PostgreSQL, or vector database.
-- No CAPTCHA solver or automated account creation.
-- No full historical archive of ignored posts.
+The current text release intentionally excludes:
 
-These constraints keep the first release inexpensive, private, and operable on one Windows laptop. They are not claims that these technologies could never be useful in a later multi-user deployment.
+- paid X API access;
+- cloud LLMs and hosted databases;
+- multi-account or multi-user operation;
+- dashboards, queues, vector databases, or distributed workers;
+- automated CAPTCHA or account-creation flows;
+- a full archive of ignored posts;
+- image, video, and audio understanding.
 
-## Model Routing
+These are scope decisions, not statements that the excluded technologies are never useful. They keep the project private, low-cost, and practical to operate on one supported Windows machine.
 
-The active text model is qwen3:8b. It is approximately 5.2 GB and is used with partial CPU/GPU offloading on the development laptop's 4 GB RTX 3050. The configuration names qwen3-vl:4b as the future vision model, but image and video processing are not yet part of the production pipeline. Video transcription is planned around faster-whisper and FFmpeg after the image milestone.
+## Provider Boundaries
 
-## Provider Contracts
+The core flow depends on focused interfaces rather than broad provider coupling:
 
-The core pipeline depends on protocols rather than concrete provider internals:
+- the fetcher provides X posts and bounded context;
+- the classifier returns a validated decision;
+- the notifier and feedback consumer handle Telegram interaction;
+- `SQLiteState` owns durable local state.
 
-- TweetFetcher for X ingestion;
-- classifier client methods for local inference;
-- Telegram notifier/client methods for outbound and inbound messages;
-- SQLiteState for durable state.
-
-This makes fixture tests fast and allows later RSS, Nitter, or alternative browser adapters without rewriting product logic.
+This separation makes fixture-based testing possible and leaves room for future ingestion adapters without rewriting product logic.

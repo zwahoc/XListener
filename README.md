@@ -1,52 +1,48 @@
 # XListener
 
-Local-first, privacy-conscious monitoring for a configurable X account.
+**Local-first monitoring for one X account, with on-device relevance filtering and private Telegram notifications.**
 
-XListener retrieves posts through a dedicated authenticated Chrome profile, uses a local Ollama model to decide what matters, and sends concise, rated notifications to Telegram. It is designed for one user, one monitored account, and high-signal personal awareness.
+XListener watches a configurable X account through a dedicated authenticated Chrome profile. It evaluates new posts with a local Ollama model, then delivers only the posts that meet your relevance threshold to a private Telegram chat. It is designed for personal, high-signal monitoring—not social analytics, bulk archiving, or multi-user operation.
 
-> Current support: Windows 11. The text milestone is implemented; image and video understanding are planned.
+> **Platform support:** Windows 11 is the only supported and intended deployment platform. This project has not been tested on macOS or Linux.
 
-## What It Does
+## Highlights
 
-- Monitors original posts, replies, reposts, and bounded parent/quote context.
-- Uses local Qwen inference with structured, validated output.
-- Reasons about relevance, importance, tone, stance, and model-generated tags.
-- Applies a selective skeptical verifier to high-risk short replies.
-- Sends Telegram messages with complete summaries, narrative reasoning, Malaysia-time timestamps, and a View tweet link.
-- Accepts 1-10 usefulness ratings and learns bounded tag affinity.
-- Recovers missed posts from a user-submitted X status link.
-- Retries durable failures without rerunning Ollama when analysis is already saved.
-- Runs continuously through a windowless Windows supervisor and system tray.
-- Pauses polling while configured games are active and unloads Ollama models to reduce GPU use.
+- Monitors authored posts, replies, reposts, and bounded related-post context.
+- Runs text classification locally through Ollama; no hosted LLM is required.
+- Produces structured relevance, importance, summary, reasoning, tone, stance, and tags.
+- Sends compact Telegram notifications with a direct link to the original post.
+- Learns bounded tag affinity from inline usefulness ratings (1–10).
+- Lets you recover a missed post by submitting a single X status URL to Telegram.
+- Preserves notification and retry state in SQLite while discarding ignored post content.
+- Can run at Windows sign-in, pause for configured games, and be controlled from the system tray.
 
-## Architecture
+## How It Works
 
-~~~text
-X account
-   |
-   v
-PlaywrightXFetcher -> ContextResolver -> SQLiteState
-                                      |
-                                      v
-                              OllamaTextClassifier
-                                      |
-                                      v
-                              TelegramNotifier
-                                      ^
-                                      |
-                         TelegramFeedbackConsumer
+```text
+X account → authenticated Chrome session → context resolution → local Ollama model
+                                                             ↓
+                                                     SQLite decision state
+                                                             ↓
+                                                    private Telegram chat
+                                                             ↓
+                                                       rating feedback
+```
 
-Task Scheduler -> GamingSupervisor -> TextDaemon
-                              ^
-                              |
-                         Tray controller
-~~~
+The first polling cycle uses a baseline cursor by default, so existing posts do not generate a flood of notifications. Later posts are processed oldest first. Qualifying posts are saved before Telegram delivery; retries reuse saved analysis rather than asking the model to classify the same post again.
 
-Ignored posts are not archived. Only an expiring ID checkpoint is retained. Qualifying, failed, and user-submitted posts are retained so notification, retry, and feedback workflows survive restarts.
+## Requirements
+
+- Windows 11
+- Python 3.11–3.14
+- Git and Google Chrome
+- [Ollama](https://ollama.com/) with the configured model (`qwen3:8b` by default)
+- A Telegram bot and a private chat ID
+- An X account for the dedicated browser session
 
 ## Quick Start
 
-~~~powershell
+```powershell
 git clone https://github.com/zwahoc/XListener.git
 Set-Location XListener
 py -3.14 -m venv .venv
@@ -58,62 +54,67 @@ ollama pull qwen3:8b
 Copy-Item .env.example .env
 Copy-Item config/config.example.yaml config.yaml
 Copy-Item config/preferences.example.yaml preferences.yaml
-~~~
+```
 
-Set the values in .env, store X credentials, authenticate the dedicated browser profile, then install background startup:
+Add your Telegram values to `.env`, save the X credentials in Windows Credential Manager, and complete the browser sign-in:
 
-~~~powershell
+```powershell
 .\.venv\Scripts\python.exe scripts/store_x_credentials.py
 .\.venv\Scripts\python.exe -m xlistener auth-x --manual
 .\.venv\Scripts\python.exe -m xlistener check
-powershell -ExecutionPolicy Bypass -File scripts/install_xlistener_task.ps1
-~~~
+```
 
-The installer registers XListener Supervisor and XListener Tray. Both run through pythonw.exe, so monitoring does not require an open terminal.
+When the checks are satisfactory, register the background supervisor and tray controller:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install_xlistener_task.ps1
+```
+
+See the [installation guide](doc/getting-started/installation.md) for the complete setup, security notes, and troubleshooting guidance.
+
+## Common Commands
+
+```powershell
+# Verify local prerequisites and configuration
+.\.venv\Scripts\python.exe -m xlistener check
+
+# Inspect local state and learned preferences
+.\.venv\Scripts\python.exe -m xlistener db-status
+
+# Fetch or run one diagnostic cycle
+.\.venv\Scripts\python.exe -m xlistener fetch-once --limit 5
+.\.venv\Scripts\python.exe -m xlistener run-once
+
+# Preview the latest qualifying notification without sending it
+.\.venv\Scripts\python.exe -m xlistener notify-latest --dry-run
+```
+
+For normal use, manage the service from the XListener tray icon. Do not start a standalone daemon while the supervisor is active.
 
 ## Documentation
 
-The complete documentation is organized under doc/:
+Start with the [documentation index](doc/README.md). The most useful guides are:
 
-- [Installation](doc/getting-started/installation.md) - prerequisites, package setup, authentication, and startup registration.
-- [Configuration](doc/getting-started/configuration.md) - environment variables, YAML settings, preferences, and game triggers.
-- [Operations](doc/getting-started/operations.md) - diagnostics, background control, logs, and recovery.
-- [Architecture](doc/engineering/architecture.md) - system boundaries and processing flow.
-- [Technology Stack](doc/engineering/tech-stack.md) - dependencies and design tradeoffs.
-- [Runtime and Data](doc/engineering/runtime-and-data.md) - persistence, retention, locks, and logs.
-- [Security and Privacy](doc/engineering/security-and-privacy.md) - local data and credential boundaries.
-- [Product Specification](doc/product/specification.md) - behavior and acceptance criteria.
-- [Implementation Status](doc/product/implementation-status.md) - completed, pending, and deferred capabilities.
-- [Roadmap](doc/product/roadmap.md) - image and video milestones.
-- [Research References](doc/references/research.md) - sources and evaluated alternatives.
+- [Installation](doc/getting-started/installation.md)
+- [Configuration](doc/getting-started/configuration.md)
+- [Operations and troubleshooting](doc/getting-started/operations.md)
+- [Architecture](doc/engineering/architecture.md)
+- [Security and privacy](doc/engineering/security-and-privacy.md)
 
-## Useful Commands
+## Status and Scope
 
-~~~powershell
-.\.venv\Scripts\python.exe -m xlistener check
-.\.venv\Scripts\python.exe -m xlistener db-status
-.\.venv\Scripts\python.exe -m xlistener gaming-status
-.\.venv\Scripts\python.exe -m xlistener fetch-once --limit 5
-.\.venv\Scripts\python.exe -m xlistener classify-latest
-.\.venv\Scripts\python.exe -m xlistener notify-latest --dry-run
-~~~
+The text-monitoring pipeline is implemented. Image understanding and video/audio processing are planned and are not part of the current release. Because X's web experience and authentication controls can change, the browser fetcher may require maintenance over time.
 
-Use the tray menu for normal pause, resume, supervisor, and log controls. The daemon should not be launched separately while the supervisor is installed and running.
+Use a dedicated X account and browser profile. XListener does not solve CAPTCHAs or automate challenge flows; review the X and Telegram terms that apply to your use.
 
 ## Development
 
-~~~powershell
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-~~~
+```
 
-The suite currently covers parser fixtures, relationship context, model validation and verification, SQLite durability, Telegram workflows, retries, supervisor lifecycle, and tray controls.
-
-## Project Status
-
-The text listener is the first usable product milestone. Image understanding is next, followed by video/audio extraction and transcription. Broader feedback-based preference learning, historical backfill, cross-account monitoring, dashboards, and cloud providers remain deferred.
-
-X's web interface and authentication behavior can change. XListener does not automate CAPTCHA solving and should be operated with a dedicated account and profile. Review the applicable X and Telegram terms before deployment.
+The test suite covers configuration, parsing, context, classification, persistence, retries, Telegram workflows, supervision, and tray controls. Live X, browser-session, and local-model behavior still require Windows deployment checks.
 
 ## License
 
-No license has been declared yet. Until one is added, the repository should be treated as source-available for personal use rather than as a permissively licensed library.
+No license has been declared. Until a license is added, do not assume permission to use, modify, or redistribute this project beyond what copyright law allows.

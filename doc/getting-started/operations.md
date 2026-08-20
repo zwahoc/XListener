@@ -1,62 +1,80 @@
 # Operations
 
+Use the tray controller for everyday pause, resume, and log access. The scheduled-task supervisor is the normal production entry point; avoid running a separate daemon while it is active.
+
 ## Diagnostics
 
-~~~powershell
+```powershell
+# Show resolved account, local paths, credential availability, Ollama, Telegram, and browser checks
 .\.venv\Scripts\python.exe -m xlistener check
+
+# Inspect cursor, retention state, notifications, feedback, and learned tag affinity
 .\.venv\Scripts\python.exe -m xlistener db-status
+
+# Show configured game processes currently detected by Windows
 .\.venv\Scripts\python.exe -m xlistener gaming-status
-~~~
+```
 
-Useful one-shot commands:
+Useful one-off commands:
 
-~~~powershell
+```powershell
 .\.venv\Scripts\python.exe -m xlistener fetch-once --limit 5
 .\.venv\Scripts\python.exe -m xlistener classify-latest
 .\.venv\Scripts\python.exe -m xlistener notify-latest --dry-run
 .\.venv\Scripts\python.exe -m xlistener run-once
-~~~
+```
 
-classify-latest prints the model result and timing without sending or retaining ignored content. run-once performs one complete polling cycle.
+`classify-latest` prints a model decision without delivering it. `notify-latest --dry-run` renders a qualifying notification without sending it. `run-once` executes one normal polling cycle, including baseline behavior and durable state updates.
 
-## Background Operation
+## Background Service
 
-The normal deployment is the Task Scheduler supervisor plus tray controller. The daemon itself is a child process and should not be launched separately while the supervisor is active.
+The installation script registers two Windows scheduled tasks:
 
-The tray menu can pause monitoring while keeping the application installed, resume it after a cooldown, stop the supervisor, and open both logs. Closing the tray icon does not stop background monitoring.
+- **XListener Supervisor** starts the daemon, restarts it after unexpected exits, pauses it for configured games, and writes status.
+- **XListener Tray** exposes local controls and opens logs.
 
-For a direct foreground diagnostic run:
+The tray menu can pause or resume monitoring, start or stop the supervisor, and open the listener or supervisor log. Exiting the tray icon does not stop the supervisor.
 
-~~~powershell
+For foreground diagnosis only:
+
+```powershell
 .\.venv\Scripts\python.exe -m xlistener run
-~~~
+```
 
-Stop a foreground or supervised daemon cooperatively with:
+To request a cooperative stop of a foreground or supervised daemon:
 
-~~~powershell
+```powershell
 .\.venv\Scripts\python.exe -m xlistener stop
-~~~
+```
 
-## Logs and State
+## Logs and Runtime State
 
-Inspect:
+By default, inspect these local files:
 
-~~~text
+```text
 %LOCALAPPDATA%\XListener\xlistener.log
 %LOCALAPPDATA%\XListener\supervisor.log
 %LOCALAPPDATA%\XListener\supervisor-status.json
-~~~
+```
 
-The logs are rotating and sanitized. The status file reports whether the daemon is running, paused, or stopped and lists detected game processes.
+Logs rotate at roughly 5 MB with three retained backups. The status file reports the daemon PID, whether it is paused, and any detected game processes. See [Runtime and data](../engineering/runtime-and-data.md) for the full list of local files.
 
 ## Telegram Workflow
 
-Notifications include a summary, model reasoning, importance, generated tags, Malaysia-time timestamps, and a View tweet link. Use the inline 1-10 rating buttons whenever a notification is useful or irrelevant. To recover a missed post, send one X status URL by itself; the bot asks for a rating before performing the expensive fetch and classification operation.
+Each qualifying notification includes a 1–10 rating keyboard. Use it to record how useful the notification was:
 
-## Common Recovery
+- `1` means irrelevant or unwanted.
+- `10` means very useful.
 
-- No X posts: check the saved Chrome session with auth-x --manual and inspect xlistener.log.
-- No Telegram messages: run check, verify the bot token/chat ID, and inspect retry errors.
-- Model unavailable: start Ollama and verify ollama list contains qwen3:8b.
-- Monitoring paused: check the tray status, configured game processes, and pause.request.
-- Duplicate startup concern: use status_xlistener_task.ps1; the daemon and supervisor locks reject competing instances.
+To recover a missed post, send a single `x.com/.../status/...` or `twitter.com/.../status/...` link to the configured private chat. XListener asks for a rating before it fetches or classifies the post. Pending requests expire after 24 hours.
+
+## Recovery Guide
+
+| Symptom | Recommended action |
+|---|---|
+| No posts are detected | Run `check`, then repeat `auth-x --manual` if the saved X session is unavailable. Review `xlistener.log`. |
+| Telegram delivery fails | Confirm the bot token and private chat ID in `.env`; run `check` and review retry errors in the listener log. |
+| Ollama is unavailable | Start Ollama and confirm `ollama list` includes the configured model. Failed work is retained for retry. |
+| Monitoring is paused | Check the tray status, configured game executable names, and `%LOCALAPPDATA%\XListener\supervisor-status.json`. |
+| Duplicate process warning | Use `scripts/status_xlistener_task.ps1`. Daemon and supervisor locks reject competing instances. |
+| Old posts appeared or nothing appeared on first run | Review `fetcher.bootstrap_mode`; `baseline` is the recommended first-run setting. |
