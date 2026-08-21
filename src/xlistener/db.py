@@ -235,6 +235,36 @@ class SQLiteState:
         ).fetchall()
         return [self._tweet_from_row(row) for row in rows]
 
+    def list_queued_tweets(self, limit: int = 20) -> list[Tweet]:
+        """Return discovered work oldest-first without removing it from SQLite."""
+
+        rows = self.connection.execute(
+            """
+            SELECT * FROM tweets
+            WHERE status = 'queued'
+            ORDER BY
+                CASE WHEN created_at IS NULL THEN 1 ELSE 0 END,
+                created_at,
+                first_seen_at,
+                id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [self._tweet_from_row(row) for row in rows]
+
+    def queued_count(self) -> int:
+        row = self.connection.execute("SELECT COUNT(*) AS count FROM tweets WHERE status = 'queued'").fetchone()
+        return int(row["count"])
+
+    def enqueue_tweet(self, tweet: Tweet) -> bool:
+        """Persist one unseen post as durable classification work."""
+
+        if self.was_recently_processed(tweet.id) or self.get_tweet(tweet.id) is not None:
+            return False
+        self.retain_tweet(tweet, "classification_queue", status="queued")
+        return True
+
     def record_processed_id(self, tweet_id: str, outcome: str, retention_days: int = 30) -> None:
         expires = (datetime.now(timezone.utc) + timedelta(days=retention_days)).isoformat()
         self.connection.execute(

@@ -173,6 +173,7 @@ def _db_status(settings) -> None:
         pending_missed = db.connection.execute(
             "SELECT COUNT(*) AS count FROM pending_missed_posts WHERE status = 'pending'"
         ).fetchone()
+        queued = db.connection.execute("SELECT COUNT(*) AS count FROM tweets WHERE status = 'queued'").fetchone()
         affinity = db.connection.execute(
             "SELECT tag, score, sample_count FROM tag_affinity ORDER BY ABS(score) DESC, tag"
         ).fetchall()
@@ -180,6 +181,7 @@ def _db_status(settings) -> None:
         print(f"Cursor: {db.get_cursor() or '<unset>'}")
         print(f"Processed-id checkpoints: {row['count']}")
         print(f"Durable tweets: {durable['count']}")
+        print(f"Queued posts: {queued['count']}")
         print(f"Notifications: {notifications['count']}")
         print(f"Feedback ratings: {feedback['count']}")
         print(f"Pending missed-post requests: {pending_missed['count']}")

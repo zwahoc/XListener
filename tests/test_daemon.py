@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -191,6 +192,100 @@ async def test_daemon_does_not_move_cursor_backward(tmp_path) -> None:
         ).poll_once()
 
         assert db.get_cursor() == "500"
+
+
+async def test_daemon_processes_late_visible_post_older_than_cursor(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    settings.runtime.database_path = tmp_path / "state.sqlite3"
+    late_reply = make_tweet("499").model_copy(update={"is_reply": True})
+    newest = make_tweet("501")
+    classifier = FakeClassifier(result())
+    notifier = FakeNotifier()
+
+    with SQLiteState(settings.runtime.database_path) as db:
+        db.set_cursor("500")
+        outcome = await TextDaemon(
+            settings,
+            db,
+            FakeFetcher([late_reply, newest]),
+            notifier,
+            classifier=classifier,
+        ).poll_once()
+
+        assert outcome.queued == 2
+        assert outcome.processed == 2
+        assert notifier.sent == ["499", "501"]
+        assert db.get_cursor() == "501"
+
+
+async def test_discovery_queue_survives_before_processing(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    settings.runtime.database_path = tmp_path / "state.sqlite3"
+    settings.fetcher.bootstrap_mode = "process_all"
+    tweets = [make_tweet("600"), make_tweet("601"), make_tweet("602")]
+    notifier = FakeNotifier()
+
+    with SQLiteState(settings.runtime.database_path) as db:
+        first_daemon = TextDaemon(
+            settings,
+            db,
+            FakeFetcher(tweets),
+            notifier,
+            classifier=FakeClassifier(result()),
+        )
+        discovered = await first_daemon.discover_once()
+
+        assert discovered.queued == 3
+        assert db.queued_count() == 3
+
+        restarted_daemon = TextDaemon(
+            settings,
+            db,
+            FakeFetcher([]),
+            notifier,
+            classifier=FakeClassifier(result()),
+        )
+        consumed = await restarted_daemon.process_queue_once(limit=10)
+
+        assert consumed.processed == 3
+        assert notifier.sent == ["600", "601", "602"]
+        assert db.queued_count() == 0
+
+
+async def test_discovery_continues_while_llm_is_processing(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    settings.runtime.database_path = tmp_path / "state.sqlite3"
+    settings.fetcher.bootstrap_mode = "process_all"
+    fetcher = FakeFetcher([make_tweet("700")])
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingClassifier(FakeClassifier):
+        async def classify(self, tweet, recent_summaries=(), learned_context="", verify=False):
+            self.calls += 1
+            started.set()
+            await release.wait()
+            return self.result, json.dumps(self.result.model_dump())
+
+    with SQLiteState(settings.runtime.database_path) as db:
+        daemon = TextDaemon(
+            settings,
+            db,
+            fetcher,
+            FakeNotifier(),
+            classifier=BlockingClassifier(result()),
+        )
+        await daemon.discover_once()
+        processing = asyncio.create_task(daemon.process_queue_once(limit=1))
+        await started.wait()
+
+        fetcher.tweets.append(make_tweet("701"))
+        discovered = await daemon.discover_once()
+
+        assert discovered.queued == 1
+        assert db.get_tweet("701") is not None
+        release.set()
+        await processing
 
 
 def test_instance_lock_rejects_second_owner(tmp_path) -> None:

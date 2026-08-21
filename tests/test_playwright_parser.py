@@ -10,6 +10,7 @@ from xlistener.models import Tweet
 
 FIXTURE = Path(__file__).parent / "fixtures" / "x_profile_articles.html"
 RENDERED_FIXTURE = Path(__file__).parent / "fixtures" / "x_profile_rendered_cards.html"
+UNMARKED_QUOTE_FIXTURE = Path(__file__).parent / "fixtures" / "x_unmarked_quote_article.html"
 
 
 def test_parser_extracts_relationships_and_media() -> None:
@@ -35,6 +36,56 @@ def test_parser_supports_current_rendered_profile_cards() -> None:
     assert tweets[0].text == "Codex has a new reset detail."
     assert tweets[1].is_reply is True
     assert tweets[1].related_posts[0].id == "190"
+
+
+def test_parser_keeps_unmarked_nested_quote_out_of_primary_text() -> None:
+    tweets = parse_tweet_articles(UNMARKED_QUOTE_FIXTURE.read_text(encoding="utf-8"), "thsottiaux")
+
+    assert len(tweets) == 1
+    tweet = tweets[0]
+    assert "20M active users" in tweet.text
+    assert "BANKED reset" in tweet.text
+    assert "sub2api" not in tweet.text
+    assert len(tweet.related_posts) == 1
+    assert tweet.related_posts[0].relationship == "quoted"
+    assert tweet.related_posts[0].id == "2090675027670978569"
+    assert "sub2api" in tweet.related_posts[0].text
+
+
+def test_graphql_text_replaces_dom_text_and_hydrates_quote() -> None:
+    tweets = [
+        Tweet(
+            id="2090766694897619318",
+            author_handle="thsottiaux",
+            text="Primary text accidentally merged with nested quote text",
+            url="https://x.com/thsottiaux/status/2090766694897619318",
+            source="test",
+        )
+    ]
+    payload = {
+        "tweet_results": {
+            "result": {
+                "__typename": "Tweet",
+                "rest_id": "2090766694897619318",
+                "core": {"user_results": {"result": {"core": {"screen_name": "thsottiaux"}}}},
+                "legacy": {"full_text": "It's me again. We hit 20M active users and every user gets a BANKED reset."},
+                "quoted_status_result": {
+                    "result": {
+                        "__typename": "Tweet",
+                        "rest_id": "2090675027670978569",
+                        "core": {"user_results": {"result": {"core": {"screen_name": "thsottiaux"}}}},
+                        "legacy": {"full_text": "We investigated messages about sub2api usage."},
+                    }
+                },
+            }
+        }
+    }
+
+    enriched = _apply_graphql_relationships(tweets, _graphql_tweet_metadata(payload))[0]
+
+    assert enriched.text == "It's me again. We hit 20M active users and every user gets a BANKED reset."
+    assert enriched.related_posts[0].relationship == "quoted"
+    assert enriched.related_posts[0].text == "We investigated messages about sub2api usage."
 
 
 def test_graphql_relationships_restore_reply_parent_from_authenticated_timeline() -> None:

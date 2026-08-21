@@ -35,6 +35,7 @@ class DaemonNotifier(Protocol):
 @dataclass(frozen=True)
 class PollResult:
     fetched: int = 0
+    queued: int = 0
     processed: int = 0
     notified: int = 0
     ignored: int = 0
@@ -126,6 +127,7 @@ class TextDaemon:
         self.classifier = classifier or OllamaTextClassifier(settings)
         self.sleep = sleep
         self.rng = rng or random.Random()
+        self.fetch_lock = asyncio.Lock()
         self.work_lock = asyncio.Lock()
 
     def _retry_delay(self, tweet_id: str) -> int:
@@ -186,8 +188,10 @@ class TextDaemon:
 
         working_tweet = tweet
         try:
-            working_tweet = await self.fetcher.enrich_context(tweet)
-            result, raw_response = await self._classify(working_tweet)
+            async with self.fetch_lock:
+                working_tweet = await self.fetcher.enrich_context(tweet)
+            async with self.work_lock:
+                result, raw_response = await self._classify(working_tweet)
         except Exception as exc:
             self._mark_failure(working_tweet, "classification", exc)
             return "failed"
@@ -207,74 +211,109 @@ class TextDaemon:
         self.state.save_analysis(working_tweet.id, result, self.settings.llm.model, raw_response)
         return "notified" if await self._deliver_saved_analysis(working_tweet, result) else "failed"
 
-    async def retry_due(self) -> int:
+    async def retry_due(self, limit: int | None = None) -> int:
         retried = 0
-        for tweet in self.state.list_retry_tweets(limit=self.settings.fetcher.max_posts_per_poll):
+        for tweet in self.state.list_retry_tweets(limit=limit or self.settings.fetcher.max_posts_per_poll):
             await self.process_tweet(tweet, retry=True)
             retried += 1
         return retried
 
-    async def poll_once(self) -> PollResult:
-        async with self.work_lock:
-            retried = await self.retry_due()
+    async def discover_once(self) -> PollResult:
+        """Fetch recent timelines quickly and durably queue every unseen post."""
+
+        async with self.fetch_lock:
             tweets = sorted(
                 await self.fetcher.fetch_recent(self.settings.fetcher.max_posts_per_poll),
                 key=_tweet_order,
             )
-            if not tweets:
-                return PollResult(retried=retried)
+        if not tweets:
+            return PollResult()
 
-            cursor = self.state.get_cursor()
-            if cursor is None and self.settings.fetcher.bootstrap_mode == "baseline":
-                self.state.set_cursor(tweets[-1].id)
-                self.state.prune_processed_ids(self.settings.learning.processed_id_max_rows)
-                LOG.info("Initialized baseline cursor at post %s", tweets[-1].id)
-                return PollResult(fetched=len(tweets), retried=retried, baseline_initialized=True)
-
-            if cursor is None and self.settings.fetcher.bootstrap_mode == "process_latest":
-                candidates = [tweets[-1]]
-            elif cursor is None:
-                candidates = tweets
-            else:
-                candidates = [tweet for tweet in tweets if _is_newer(tweet.id, cursor)]
-            candidates = [
-                tweet
-                for tweet in candidates
-                if (self.settings.fetcher.include_replies or not tweet.is_reply)
-                and (self.settings.fetcher.include_reposts or not tweet.is_repost)
-            ]
-
-            processed = notified = ignored = failed = 0
-            for tweet in candidates:
-                if self.state.was_recently_processed(tweet.id):
-                    continue
-                outcome = await self.process_tweet(tweet)
-                processed += 1
-                notified += int(outcome == "notified")
-                ignored += int(outcome == "ignored")
-                failed += int(outcome == "failed")
-
-            if cursor is None or _is_newer(tweets[-1].id, cursor):
-                self.state.set_cursor(tweets[-1].id)
+        eligible = [
+            tweet
+            for tweet in tweets
+            if (self.settings.fetcher.include_replies or not tweet.is_reply)
+            and (self.settings.fetcher.include_reposts or not tweet.is_repost)
+        ]
+        cursor = self.state.get_cursor()
+        if cursor is None and self.settings.fetcher.bootstrap_mode == "baseline":
+            for tweet in eligible:
+                self.state.record_processed_id(
+                    tweet.id,
+                    "baseline",
+                    retention_days=self.settings.learning.processed_id_retention_days,
+                )
+            self.state.set_cursor(tweets[-1].id)
             self.state.prune_processed_ids(self.settings.learning.processed_id_max_rows)
-            return PollResult(
-                fetched=len(tweets),
-                processed=processed,
-                notified=notified,
-                ignored=ignored,
-                failed=failed,
-                retried=retried,
-            )
+            LOG.info("Initialized baseline at post %s with %s checkpoints", tweets[-1].id, len(eligible))
+            return PollResult(fetched=len(tweets), baseline_initialized=True)
 
-    async def polling_loop(self, stop_event: asyncio.Event | None = None) -> None:
+        if cursor is None and self.settings.fetcher.bootstrap_mode == "process_latest":
+            candidates = eligible[-1:]
+            for tweet in eligible[:-1]:
+                self.state.record_processed_id(
+                    tweet.id,
+                    "baseline",
+                    retention_days=self.settings.learning.processed_id_retention_days,
+                )
+        else:
+            # Do not filter only by the high-water cursor here. A reply can
+            # appear late after the Replies timeline was temporarily missing,
+            # and its snowflake ID can be older than a post already observed.
+            candidates = eligible
+
+        queued = sum(self.state.enqueue_tweet(tweet) for tweet in candidates)
+        if cursor is None or _is_newer(tweets[-1].id, cursor):
+            self.state.set_cursor(tweets[-1].id)
+        self.state.prune_processed_ids(self.settings.learning.processed_id_max_rows)
+        if queued:
+            LOG.info("Queued %s unseen post(s); queue depth is %s", queued, self.state.queued_count())
+        return PollResult(fetched=len(tweets), queued=queued)
+
+    async def process_queue_once(self, limit: int = 1) -> PollResult:
+        """Consume durable work oldest-first; discovery continues independently."""
+
+        retried = await self.retry_due(limit=limit)
+        remaining = max(0, limit - retried)
+        processed = notified = ignored = failed = 0
+        for tweet in self.state.list_queued_tweets(limit=remaining):
+            outcome = await self.process_tweet(tweet)
+            processed += 1
+            notified += int(outcome == "notified")
+            ignored += int(outcome == "ignored")
+            failed += int(outcome == "failed")
+        return PollResult(
+            processed=processed,
+            notified=notified,
+            ignored=ignored,
+            failed=failed,
+            retried=retried,
+        )
+
+    async def poll_once(self) -> PollResult:
+        discovered = await self.discover_once()
+        if discovered.baseline_initialized:
+            return discovered
+        consumed = await self.process_queue_once(limit=self.settings.fetcher.max_posts_per_poll)
+        return PollResult(
+            fetched=discovered.fetched,
+            queued=discovered.queued,
+            processed=consumed.processed,
+            notified=consumed.notified,
+            ignored=consumed.ignored,
+            failed=consumed.failed,
+            retried=consumed.retried,
+        )
+
+    async def discovery_loop(self, stop_event: asyncio.Event | None = None) -> None:
         while stop_event is None or not stop_event.is_set():
             delay = self.rng.uniform(
                 self.settings.fetcher.poll_min_seconds,
                 self.settings.fetcher.poll_max_seconds,
             )
             try:
-                result = await self.poll_once()
-                LOG.info("Poll complete: %s", result)
+                result = await self.discover_once()
+                LOG.info("Discovery complete: %s", result)
             except XAuthenticationRequired as exc:
                 LOG.error("X authentication requires attention: %s", exc)
                 delay = self.settings.runtime.auth_error_seconds
@@ -287,6 +326,23 @@ class TextDaemon:
             else:
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+
+    async def processing_loop(self, stop_event: asyncio.Event | None = None) -> None:
+        while stop_event is None or not stop_event.is_set():
+            try:
+                result = await self.process_queue_once(limit=1)
+                if result.processed or result.retried:
+                    LOG.info("Queue processing complete: %s; remaining=%s", result, self.state.queued_count())
+                    continue
+            except Exception:
+                LOG.exception("Queue processing failed")
+            if stop_event is None:
+                await self.sleep(2)
+            else:
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=2)
                 except asyncio.TimeoutError:
                     pass
 
@@ -309,7 +365,13 @@ async def run_daemon(settings: Settings, once: bool = False) -> PollResult | Non
 
                 settings.runtime.stop_request_path.unlink(missing_ok=True)
                 stop_event = asyncio.Event()
-                recovery = MissedPostRecovery(settings, state, fetcher=fetcher, work_lock=daemon.work_lock)
+                recovery = MissedPostRecovery(
+                    settings,
+                    state,
+                    fetcher=fetcher,
+                    fetch_lock=daemon.fetch_lock,
+                    work_lock=daemon.work_lock,
+                )
                 async with TelegramFeedbackConsumer(settings, state, missed_recovery=recovery) as consumer:
                     async def feedback_loop() -> None:
                         while not stop_event.is_set():
@@ -323,7 +385,8 @@ async def run_daemon(settings: Settings, once: bool = False) -> PollResult | Non
 
                     async with asyncio.TaskGroup() as tasks:
                         tasks.create_task(_watch_stop_request(settings.runtime.stop_request_path, stop_event), name="stop-watcher")
-                        tasks.create_task(daemon.polling_loop(stop_event), name="x-polling")
+                        tasks.create_task(daemon.discovery_loop(stop_event), name="x-discovery")
+                        tasks.create_task(daemon.processing_loop(stop_event), name="llm-queue")
                         tasks.create_task(feedback_loop(), name="telegram-feedback")
                 LOG.info("XListener daemon stopped cooperatively")
     return None

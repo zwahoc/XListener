@@ -127,12 +127,15 @@ def _graphql_tweet_metadata(payload: object) -> dict[str, dict[str, object]]:
         user_core = user.get("core") if isinstance(user, dict) else None
         entry: dict[str, object] = {
             "author_handle": user_core.get("screen_name") if isinstance(user_core, dict) else None,
+            "text": _graphql_tweet_text(tweet),
             "reply_id": legacy.get("in_reply_to_status_id_str"),
             "reply_handle": legacy.get("in_reply_to_screen_name"),
             "quote_id": None,
             "quote_handle": None,
+            "quote_text": None,
             "repost_id": None,
             "repost_handle": None,
+            "repost_text": None,
         }
 
         quoted = tweet.get("quoted_status_result")
@@ -140,6 +143,7 @@ def _graphql_tweet_metadata(payload: object) -> dict[str, dict[str, object]]:
         quoted_tweet = _unwrap_graphql_tweet(quoted_result)
         if quoted_tweet:
             entry["quote_id"] = quoted_tweet.get("rest_id")
+            entry["quote_text"] = _graphql_tweet_text(quoted_tweet)
             quoted_core = quoted_tweet.get("core")
             quoted_user_results = quoted_core.get("user_results") if isinstance(quoted_core, dict) else None
             quoted_user = quoted_user_results.get("result") if isinstance(quoted_user_results, dict) else None
@@ -153,6 +157,7 @@ def _graphql_tweet_metadata(payload: object) -> dict[str, dict[str, object]]:
         retweeted_tweet = _unwrap_graphql_tweet(retweeted_result)
         if retweeted_tweet:
             entry["repost_id"] = retweeted_tweet.get("rest_id")
+            entry["repost_text"] = _graphql_tweet_text(retweeted_tweet)
             repost_core = retweeted_tweet.get("core")
             repost_user_results = repost_core.get("user_results") if isinstance(repost_core, dict) else None
             repost_user = repost_user_results.get("result") if isinstance(repost_user_results, dict) else None
@@ -161,6 +166,21 @@ def _graphql_tweet_metadata(payload: object) -> dict[str, dict[str, object]]:
 
         metadata[tweet_id] = entry
     return metadata
+
+
+def _graphql_tweet_text(tweet: dict[str, object]) -> str:
+    """Return the authoritative text for one GraphQL Tweet object."""
+
+    note_tweet = tweet.get("note_tweet")
+    note_results = note_tweet.get("note_tweet_results") if isinstance(note_tweet, dict) else None
+    note_result = note_results.get("result") if isinstance(note_results, dict) else None
+    note_text = note_result.get("text") if isinstance(note_result, dict) else None
+    if isinstance(note_text, str) and note_text.strip():
+        return note_text.strip()
+
+    legacy = tweet.get("legacy")
+    full_text = legacy.get("full_text") if isinstance(legacy, dict) else None
+    return full_text.strip() if isinstance(full_text, str) else ""
 
 
 def _apply_graphql_relationships(tweets: list[Tweet], metadata: dict[str, dict[str, object]]) -> list[Tweet]:
@@ -174,26 +194,40 @@ def _apply_graphql_relationships(tweets: list[Tweet], metadata: dict[str, dict[s
             continue
         related = list(tweet.related_posts)
 
-        def add(relationship: str, related_id: object, handle: object) -> None:
-            if not related_id or any(post.id == str(related_id) and post.relationship == relationship for post in related):
+        def add(relationship: str, related_id: object, handle: object, related_text: object = None) -> None:
+            if not related_id:
                 return
+            normalized_handle = str(handle).lower() if handle else None
+            normalized_text = str(related_text).strip() if related_text else ""
+            for index, post in enumerate(related):
+                if post.id == str(related_id) and post.relationship == relationship:
+                    related[index] = post.model_copy(
+                        update={
+                            "author_handle": normalized_handle or post.author_handle,
+                            "text": normalized_text or post.text,
+                        }
+                    )
+                    return
             related.append(
                 RelatedPost(
                     relationship=relationship,
                     id=str(related_id),
-                    author_handle=str(handle).lower() if handle else None,
-                    url=f"https://x.com/{str(handle).lower() if handle else 'i'}/status/{related_id}",
+                    author_handle=normalized_handle,
+                    text=normalized_text,
+                    url=f"https://x.com/{normalized_handle or 'i'}/status/{related_id}",
                 )
             )
 
         add("reply_parent", info.get("reply_id"), info.get("reply_handle"))
-        add("quoted", info.get("quote_id"), info.get("quote_handle"))
-        add("reposted", info.get("repost_id"), info.get("repost_handle"))
+        add("quoted", info.get("quote_id"), info.get("quote_handle"), info.get("quote_text"))
+        add("reposted", info.get("repost_id"), info.get("repost_handle"), info.get("repost_text"))
         is_reply = bool(info.get("reply_id")) or tweet.is_reply
         is_repost = bool(info.get("repost_id")) or tweet.is_repost
+        authoritative_text = str(info.get("text") or "").strip()
         enriched.append(
             tweet.model_copy(
                 update={
+                    "text": authoritative_text or tweet.text,
                     "is_reply": is_reply,
                     "in_reply_to_url": next((post.url for post in related if post.relationship == "reply_parent"), None),
                     "is_repost": is_repost,
@@ -217,6 +251,31 @@ def _in_quote(node: Tag, article: Tag) -> bool:
             return True
         parent = parent.parent
     return False
+
+
+def _nested_status_container(node: Tag, article: Tag, own_tweet_id: str) -> Tag | None:
+    """Find a nested status card even when X omits its old quoteTweet marker."""
+
+    candidate: Tag | None = None
+    parent = node.parent
+    while isinstance(parent, Tag) and parent is not article:
+        status_ids = {
+            related_id
+            for link in parent.select('a[href*="/status/"]')
+            if (related_id := _status_id(link.get("href")))
+        }
+        if own_tweet_id in status_ids:
+            break
+        if any(related_id != own_tweet_id for related_id in status_ids):
+            candidate = parent
+            if parent.select_one('[data-testid="tweetText"], img[src], video[poster]'):
+                return parent
+        parent = parent.parent
+    return candidate
+
+
+def _in_nested_status(node: Tag, article: Tag, own_tweet_id: str) -> bool:
+    return _nested_status_container(node, article, own_tweet_id) is not None
 
 
 def _text_from_nodes(nodes: Iterable[Tag]) -> str:
@@ -253,7 +312,7 @@ def _author_name(article: Tag) -> str | None:
     return None
 
 
-def _media_from_article(article: Tag) -> list[MediaAsset]:
+def _media_from_article(article: Tag, own_tweet_id: str) -> list[MediaAsset]:
     media: list[MediaAsset] = []
     seen: set[str] = set()
     for image in article.select("img[src]"):
@@ -266,7 +325,7 @@ def _media_from_article(article: Tag) -> list[MediaAsset]:
                 kind="image",
                 url=_absolute_url(url),
                 alt_text=image.get("alt") or None,
-                source="quoted" if _in_quote(image, article) else "direct",
+                source="quoted" if _in_quote(image, article) or _in_nested_status(image, article, own_tweet_id) else "direct",
             )
         )
     for video in article.select("video[poster]"):
@@ -286,7 +345,11 @@ def _parse_legacy_articles(soup: BeautifulSoup, monitored_handle: str, source: s
         if not tweet_id:
             continue
 
-        text_nodes = [node for node in article.select('[data-testid="tweetText"]') if not _in_quote(node, article)]
+        text_nodes = [
+            node
+            for node in article.select('[data-testid="tweetText"]')
+            if not _in_quote(node, article) and not _in_nested_status(node, article, tweet_id)
+        ]
         if not text_nodes:
             text_nodes = article.select('[data-testid="tweetText"]')
         text = _text_from_nodes(text_nodes)
@@ -309,20 +372,29 @@ def _parse_legacy_articles(soup: BeautifulSoup, monitored_handle: str, source: s
             if quote_id:
                 relation_links["quoted"] = (quote_id, quote_link)
 
+        full_text_lower = article.get_text(" ", strip=True).lower()
         for link in status_links:
             related_id = _status_id(link.get("href"))
             if not related_id or related_id == tweet_id or _in_quote(link, article):
                 continue
-            relation_links.setdefault("reposted" if "reposted" in article.get_text(" ", strip=True).lower() else "reply_parent", (related_id, link))
+            nested_container = _nested_status_container(link, article, tweet_id)
+            if nested_container is not None:
+                relationship = "quoted"
+            elif "reposted" in full_text_lower:
+                relationship = "reposted"
+            else:
+                relationship = "reply_parent"
+            relation_links.setdefault(relationship, (related_id, link))
 
         social_text = " ".join(node.get_text(" ", strip=True) for node in article.select('[data-testid="socialContext"]'))
-        full_text_lower = article.get_text(" ", strip=True).lower()
         is_repost = "reposted" in social_text.lower() or " reposted " in f" {full_text_lower} "
         is_reply = "replying to" in full_text_lower or "reply_parent" in relation_links
 
         related_posts: list[RelatedPost] = []
         for relationship, (related_id, link) in relation_links.items():
-            container = link.parent if isinstance(link.parent, Tag) else article
+            container = _nested_status_container(link, article, tweet_id)
+            if container is None:
+                container = link.parent if isinstance(link.parent, Tag) else article
             related_text_nodes = container.select('[data-testid="tweetText"]') if isinstance(container, Tag) else []
             related_posts.append(
                 RelatedPost(
@@ -344,7 +416,7 @@ def _parse_legacy_articles(soup: BeautifulSoup, monitored_handle: str, source: s
                 created_at=created_at,
                 is_reply=is_reply,
                 in_reply_to_url=next((post.url for post in related_posts if post.relationship == "reply_parent"), None),
-                media=_media_from_article(article),
+                media=_media_from_article(article, tweet_id),
                 is_repost=is_repost,
                 related_posts=related_posts[:3],
                 context_complete=not (is_reply and not any(post.relationship == "reply_parent" for post in related_posts)),
@@ -432,7 +504,7 @@ def _parse_rendered_cards(soup: BeautifulSoup, monitored_handle: str, source: st
                 url=_absolute_url(own_link.get("href")),
                 is_reply=is_reply,
                 in_reply_to_url=next((post.url for post in related_posts if post.relationship == "reply_parent"), None),
-                media=_media_from_article(card),
+                media=_media_from_article(card, tweet_id),
                 is_repost="reposted" in full_text_lower,
                 related_posts=related_posts,
                 context_complete=not (is_reply and not related_posts),
