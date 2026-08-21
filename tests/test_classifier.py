@@ -67,6 +67,8 @@ def test_prompt_includes_author_entity_and_reply_first_guidance(tmp_path) -> Non
     assert "@claudedevs" in prompt
     assert "primary evidence" in prompt.lower()
     assert "tone" in messages[0]["content"].lower()
+    assert "must be meaningfully different" in messages[0]["content"].lower()
+    assert "do not retell the post" in messages[0]["content"].lower()
 
 
 def test_context_bundle_resolves_related_author_to_known_entity(tmp_path) -> None:
@@ -163,6 +165,37 @@ async def test_classifier_repairs_invalid_first_response(tmp_path) -> None:
     assert result.relevant is False
     assert len(client.calls) == 2
     assert "previous response was invalid" in client.calls[1]["messages"][1]["content"].lower()
+
+
+async def test_classifier_repairs_duplicate_summary_and_reason(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    duplicate = json.dumps(
+        {
+            "relevant": True,
+            "importance": 8,
+            "topic": "Codex reset",
+            "tags": ["codex", "reset"],
+            "reason": "Codex users receive an additional reset this week.",
+            "summary": "Codex users receive an additional reset this week.",
+        }
+    )
+    corrected = json.dumps(
+        {
+            "relevant": True,
+            "importance": 8,
+            "topic": "Codex reset",
+            "tags": ["codex", "reset"],
+            "reason": "This directly matches the user's interest in reset timing and has an immediate practical effect on available usage.",
+            "summary": "Codex users receive an additional reset this week.",
+        }
+    )
+    client = FakeOllamaClient([duplicate, corrected])
+
+    result, _raw = await OllamaTextClassifier(settings, client).classify(reply_tweet())
+
+    assert result.reason != result.summary
+    assert len(client.calls) == 2
+    assert "identical or near-identical" in client.calls[1]["messages"][1]["content"]
 
 
 async def test_classifier_fails_after_two_invalid_responses(tmp_path) -> None:
