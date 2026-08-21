@@ -17,6 +17,8 @@ The primary user follows an account that occasionally posts product, developer, 
 - Include bounded parent, quote, and repost context where available.
 - Treat the monitored account's own text as the primary evidence.
 - Establish a first-run baseline by default to avoid notifying existing posts.
+- Persist every unseen eligible post from the recent window in a durable oldest-first queue.
+- Continue discovery while an earlier post is being classified or while the daemon is recovering from a pause.
 
 ### Classification
 
@@ -38,6 +40,7 @@ The primary user follows an account that occasionally posts product, developer, 
 - Accept a single X or Twitter status link as a missed-post report.
 - Ask for a rating before fetching or classifying the submitted post.
 - Retain qualifying, failed, and user-submitted work in SQLite.
+- Recover queued and retryable work after process or machine restart.
 - Discard ignored post content after recording a bounded deduplication checkpoint.
 - Retry failures with bounded exponential backoff and avoid reclassifying an already saved decision for delivery retries.
 

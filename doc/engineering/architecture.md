@@ -39,18 +39,15 @@ The fetcher is an adapter boundary. X page or session changes should be isolated
 
 ### Text Daemon
 
-Each polling cycle is serialized by a work lock:
+Discovery and model processing are separate loops. This keeps X polling active while Ollama is processing an earlier post:
 
-1. Retry due durable failures.
-2. Fetch and order a bounded window of recent posts.
-3. Establish a first-run baseline or identify posts newer than the cursor.
-4. Enrich unseen posts with relationship context.
-5. Classify each candidate and apply the delivery threshold.
-6. Retain qualifying or failed work; discard ignored content after recording an expiring ID checkpoint.
-7. Deliver qualifying notifications and record confirmed Telegram message IDs.
-8. Advance the cursor and prune old checkpoints.
+1. Discovery fetches up to `max_posts_per_poll` recent posts (20 by default), orders them oldest-first, and compares each ID with SQLite state.
+2. Every unseen eligible post is persisted as durable `queued` work. The high-water cursor is only a discovery hint; the ID checkpoint and tweet record are the deduplication authority.
+3. Processing consumes queued work oldest-first, retrying due failures before new work. It enriches context, classifies the post, applies the delivery threshold, and records the terminal outcome.
+4. Qualifying posts are delivered and confirmed Telegram message IDs are stored. Ignored posts retain only an expiring ID checkpoint; failed work remains retryable.
+5. On restart, queued and retryable records are read from SQLite, so posts discovered during a slow model call or a gaming pause are not silently dropped.
 
-Telegram feedback polling runs alongside X polling. A shared work lock ensures a user-submitted missed-post request cannot alter the same state while normal processing is in progress.
+The fetcher and classifier use separate locks. Fetching can be serialized with missed-post retrieval while classification is protected independently, allowing discovery to continue while Ollama processes the queue. Telegram feedback polling runs alongside both loops.
 
 ### Local Classifier
 

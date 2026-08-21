@@ -39,6 +39,8 @@ The SQLite database provides durable, restart-safe state:
 
 Ignored posts are not archived. After a non-qualifying decision, XListener records only the post ID and outcome in `processed_ids`, subject to the configured time and row limits. This is an intentional privacy and storage boundary.
 
+The `tweets.status` column also acts as the durable work queue. Newly discovered posts use `queued`; classified posts use `classified`; delivery failures use `failed` with a retry timestamp. The queue is ordered by the post timestamp and first-seen time so a backlog is processed oldest-first.
+
 ## Processing and Retry Lifecycle
 
 ```text
@@ -50,6 +52,8 @@ new post → context → classification ──→ ignored checkpoint
 ```
 
 Qualifying posts are persisted before delivery. If Telegram fails, the next attempt reuses the saved classification. Failed classification or context work is also retained so it can be retried with exponential backoff. The cursor advances after fetched work has reached a safe terminal outcome or durable retry state.
+
+Discovery polls a bounded 20-post window by default rather than relying only on a single latest-post cursor. This catches several posts created while the daemon was paused, gaming-aware supervision was active, or an earlier Ollama call was still running. Repeated observations are cheap ID checks and do not reclassify saved work.
 
 ## Locks and Control Markers
 
