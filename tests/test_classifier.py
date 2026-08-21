@@ -124,7 +124,7 @@ async def test_classifier_validates_structured_result_and_normalizes_tags(tmp_pa
     assert result.tags == ["codex", "reset"]
     assert result.importance == 9
     assert raw == response
-    assert client.calls[0]["think"] is False
+    assert client.calls[0]["think"] is True
     assert isinstance(client.calls[0]["format"], dict)
 
 

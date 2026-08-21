@@ -264,7 +264,7 @@ class OllamaTextClassifier:
                 model=self.settings.llm.model,
                 messages=active_messages,
                 stream=False,
-                think=False,
+                think=True,
                 format=ClassificationResult.model_json_schema(),
                 options={"temperature": self.settings.llm.temperature},
                 keep_alive=self.settings.llm.keep_alive,
