@@ -28,6 +28,7 @@ htmlcov/
 .ruff_cache/
 .tox/
 .nox/
+.test-tmp-*/
 
 # Local secrets and machine-specific configuration
 .env

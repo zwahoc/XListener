@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from xlistener.config import load_settings
@@ -85,3 +86,57 @@ async def test_missed_post_recovery_rejects_another_account(tmp_path, monkeypatc
             raise AssertionError("expected MissedPostError")
 
         assert db.connection.execute("SELECT COUNT(*) FROM tweets").fetchone()[0] == 0
+
+
+async def test_missed_post_classification_releases_fetch_lock_for_discovery(tmp_path, monkeypatch) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    tweet = Tweet(
+        id="300",
+        author_handle=settings.account.handle,
+        text="A recovered post being classified.",
+        url=f"https://x.com/{settings.account.handle}/status/300",
+        source="test",
+    )
+    classifier_started = asyncio.Event()
+    release_classifier = asyncio.Event()
+
+    class BlockingClassifier:
+        def __init__(self, _settings):
+            pass
+
+        async def classify(self, tweet, learned_context="", verify=False):
+            classifier_started.set()
+            await release_classifier.wait()
+            result = ClassificationResult(
+                relevant=True,
+                importance=8,
+                topic="product update",
+                tags=["product_update"],
+                reason="This is useful because it matches the user's product-update interests.",
+                summary="The monitored author shared a product update.",
+            )
+            return result, json.dumps(result.model_dump())
+
+    monkeypatch.setattr("xlistener.missed_posts.OllamaTextClassifier", BlockingClassifier)
+    fetch_lock = asyncio.Lock()
+    work_lock = asyncio.Lock()
+
+    with SQLiteState(tmp_path / "state.sqlite3") as db:
+        recovery = MissedPostRecovery(
+            settings,
+            db,
+            fetcher=FakeFetcher(settings, tweet),
+            fetch_lock=fetch_lock,
+            work_lock=work_lock,
+        )
+        processing = asyncio.create_task(recovery.process(str(tweet.url), 8))
+        await classifier_started.wait()
+
+        # Missed-post fetching is finished at this point. Normal discovery can
+        # acquire the fetch lock even though Ollama classification is ongoing.
+        await asyncio.wait_for(fetch_lock.acquire(), timeout=0.5)
+        fetch_lock.release()
+        assert work_lock.locked()
+
+        release_classifier.set()
+        await processing
