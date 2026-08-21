@@ -45,6 +45,19 @@ def _entity_for_handle(author: str | None, settings: Settings | None) -> dict[st
     if not author or settings is None:
         return None
     normalized = author.strip().lstrip("@").lower()
+    monitored_org = settings.author_context
+    official_handles = [
+        str(item).strip().lstrip("@").lower() for item in monitored_org.get("official_handles", [])
+    ]
+    if normalized in official_handles:
+        return {
+            "organization": monitored_org.get("organization", "unknown"),
+            "relationship": "monitored author's organization",
+            "products": [
+                *monitored_org.get("products_of_interest", []),
+                *monitored_org.get("product_aliases", []),
+            ],
+        }
     for entity in settings.entity_context:
         handles = [str(item).strip().lstrip("@").lower() for item in entity.get("handles", [])]
         if normalized in handles:
@@ -119,11 +132,13 @@ def _preferences_text(settings: Settings) -> str:
     ignored = "\n".join(f"- {item}" for item in settings.ignore)
     author = settings.author_context
     author_notes = "\n".join(f"- {item}" for item in author.get("notes", [])) or "- (none)"
+    author_aliases = ", ".join(str(item) for item in author.get("product_aliases", [])) or "(none listed)"
     entities = "\n".join(
         f"- {item.get('organization', 'Unknown')}: "
         f"{', '.join(str(product) for product in item.get('products', []))} "
         f"({item.get('relationship', 'unknown')}); handles: "
         f"{', '.join('@' + str(handle).lstrip('@') for handle in item.get('handles', [])) or '(none listed)'}. "
+        f"aliases: {', '.join(str(alias) for alias in item.get('aliases', [])) or '(none listed)'}. "
         f"{item.get('description', '')}".rstrip()
         for item in settings.entity_context
     ) or "- (none)"
@@ -133,7 +148,8 @@ def _preferences_text(settings: Settings) -> str:
         f"INTERESTS:\n{interests}\n\nUSUALLY IGNORE:\n{ignored}\n\n"
         f"MONITORED AUTHOR CONTEXT:\n- handle: @{author.get('handle', settings.account.handle)}\n"
         f"- name: {author.get('name', 'unknown')}\n- organization: {author.get('organization', 'unknown')}\n"
-        f"- role: {author.get('role', 'unknown')}\n- products of interest: {products_of_interest}\n{author_notes}\n\n"
+        f"- role: {author.get('role', 'unknown')}\n- products of interest: {products_of_interest}\n"
+        f"- product aliases and model codenames: {author_aliases}\n{author_notes}\n\n"
         f"KNOWN AI ENTITIES:\n{entities}\n\nINTERPRETATION RULES:\n{rules}"
     )
 

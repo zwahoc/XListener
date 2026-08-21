@@ -63,6 +63,9 @@ def test_prompt_includes_author_entity_and_reply_first_guidance(tmp_path) -> Non
     assert "Claude Code" in prompt
     assert "Opus 5" in prompt
     assert "Codex-CLI" in prompt
+    assert "Sol (GPT-5.6 Sol)" in prompt
+    assert "Terra (Codex/ChatGPT model family)" in prompt
+    assert "aliases: Claude Code, Claude Opus, Claude Sonnet, Claude Haiku" in prompt
     assert "Strongest overlap with OpenAI" in prompt
     assert "@claudedevs" in prompt
     assert "primary evidence" in prompt.lower()
@@ -95,6 +98,32 @@ def test_context_bundle_resolves_related_author_to_known_entity(tmp_path) -> Non
     assert "author: @claudedevs" in bundle
     assert "known_entity: Anthropic" in bundle
     assert "known_entity_products: Claude, Claude Code, Opus 5, Fable 5" in bundle
+
+
+def test_context_bundle_resolves_official_openai_post_and_model_aliases(tmp_path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.yaml")
+    tweet = Tweet(
+        id="2090887457915232269",
+        author_handle="thsottiaux",
+        text="Sol shines brighter today. Efficiency, reliability and performance are the name of the game.",
+        url="https://x.com/thsottiaux/status/2090887457915232269",
+        related_posts=[
+            RelatedPost(
+                relationship="quoted",
+                author_handle="openai",
+                text="We are dropping API and credit pricing of GPT-5.6 Sol by over 20%.",
+                url="https://x.com/openai/status/2090885187634905500",
+            )
+        ],
+        source="test",
+    )
+
+    bundle = build_context_bundle(tweet, settings)
+
+    assert "author: @openai" in bundle
+    assert "known_entity: OpenAI" in bundle
+    assert "known_entity_relationship: monitored author's organization" in bundle
+    assert "Sol (GPT-5.6 Sol)" in bundle
 
 
 def test_prompt_includes_learned_preference_guidance(tmp_path) -> None:

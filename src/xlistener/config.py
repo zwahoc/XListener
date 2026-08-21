@@ -47,7 +47,13 @@ DEFAULT_AUTHOR_CONTEXT = {
     "name": "Tibo",
     "organization": "OpenAI",
     "role": "OpenAI employee",
+    "official_handles": ["openai", "chatgpt", "openaidevs"],
     "products_of_interest": ["Codex", "ChatGPT", "ChatGPT Work", "Codex-CLI"],
+    "product_aliases": [
+        "Sol (GPT-5.6 Sol)",
+        "Terra (Codex/ChatGPT model family)",
+        "Luna (Codex/ChatGPT model family)",
+    ],
     "notes": [
         "The account may post product information, competitive commentary, jokes, sarcasm, marketing, and engagement questions.",
         "Do not treat every post as an official announcement or literal statement.",
@@ -60,6 +66,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "direct competitor",
         "handles": ["claudedevs", "claudeai", "anthropicai"],
         "products": ["Claude", "Claude Code", "Opus 5", "Fable 5"],
+        "aliases": ["Claude Code", "Claude Opus", "Claude Sonnet", "Claude Haiku"],
         "description": "Strongest overlap with OpenAI in frontier models, coding agents, APIs, and enterprise AI.",
     },
     {
@@ -67,6 +74,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "direct competitor",
         "handles": ["googledeepmind", "geminiapp", "googleai"],
         "products": ["Gemini", "Gemini 3.5", "Gemini 3.6 Flash", "Gemini API"],
+        "aliases": ["Gemini Flash", "Gemini Pro", "Gemini Advanced", "Google AI Studio"],
         "description": "Competes across general AI, multimodal models, coding, agents, and enterprise AI.",
     },
     {
@@ -74,6 +82,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "direct competitor",
         "handles": ["xai", "grok"],
         "products": ["Grok", "Grok 4.6", "Grok API", "Grok Build"],
+        "aliases": ["Grok Code", "Grok Imagine"],
         "description": "Competes with ChatGPT, OpenAI models, APIs, and coding or agent products.",
     },
     {
@@ -81,6 +90,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["moonshot_ai", "kimi_moonshot"],
         "products": ["Kimi", "Kimi K3", "Kimi Code", "Kimi Work"],
+        "aliases": ["Kimi Chat", "Kimi API"],
         "description": "Competes in reasoning, coding, long-context models, and agents.",
     },
     {
@@ -88,6 +98,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["qwen", "alibaba_cloud"],
         "products": ["Qwen", "Qwen3.8-Max", "Qwen Code", "Qwen3-Coder"],
+        "aliases": ["Qwen3", "Qwen Max", "Qwen Chat", "Alibaba Cloud Model Studio"],
         "description": "Strong competitor in open models, coding, APIs, and agentic AI.",
     },
     {
@@ -95,6 +106,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["metaai", "aiatmeta"],
         "products": ["Meta AI", "Llama", "Muse"],
+        "aliases": ["Llama 4", "Llama Code", "Meta AI assistant"],
         "description": "Competes in assistants, foundation models, multimodal AI, and open models.",
     },
     {
@@ -102,6 +114,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["deepseek_ai"],
         "products": ["DeepSeek", "DeepSeek V4 Pro", "DeepSeek API"],
+        "aliases": ["DeepSeek R1", "DeepSeek Chat", "DeepSeek Coder"],
         "description": "Competes heavily on reasoning, coding, and price-to-performance.",
     },
     {
@@ -109,6 +122,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["zhipuai", "chatglm"],
         "products": ["GLM", "GLM-5.3", "ZCode"],
+        "aliases": ["ChatGLM", "GLM Coding", "Zhipu API"],
         "description": "Competes in foundation models, coding agents, and enterprise AI.",
     },
     {
@@ -116,6 +130,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["minimax_ai"],
         "products": ["MiniMax M3", "MiniMax H3", "MiniMax API"],
+        "aliases": ["MiniMax Agent", "MiniMax abab"],
         "description": "Competes across LLMs, coding, agents, image, video, and audio AI.",
     },
     {
@@ -123,6 +138,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "competitor",
         "handles": ["mistralai"],
         "products": ["Le Chat", "Mistral Large", "Devstral", "Mistral Vibe"],
+        "aliases": ["Mistral", "Codestral", "Mistral API"],
         "description": "Competes in enterprise AI, APIs, open models, and coding.",
     },
     {
@@ -130,6 +146,7 @@ DEFAULT_ENTITY_CONTEXT = [
         "relationship": "strategic partner, investor, and partial competitor",
         "handles": ["microsoft", "msft", "github"],
         "products": ["Microsoft Copilot", "GitHub Copilot", "Azure OpenAI", "Microsoft Foundry"],
+        "aliases": ["Copilot", "Copilot Studio", "GitHub Copilot Coding Agent"],
         "description": "Closely partnered with OpenAI, but also builds overlapping AI products and platforms.",
     },
 ]
@@ -142,6 +159,8 @@ DEFAULT_INTERPRETATION_RULES = [
     "If tone or meaning is uncertain, be conservative and say so in the reasoning.",
     "Competitor-only news is not automatically relevant to Codex or ChatGPT, but a monitored reply can still be relevant as competitive commentary or strategic positioning even when it does not mention Codex.",
     "When a short monitored reply depends on its parent, summarize the parent subject and then clearly separate the monitored author's words, inferred stance, and the parent's factual claims.",
+    "The monitored author's configured product aliases are part of the OpenAI product glossary. Treat a concrete update about Sol, Terra, Luna, or another listed alias as relevant product evidence even when the post does not say Codex or ChatGPT.",
+    "Model pricing, availability, performance, efficiency, reliability, capability, or usage-limit changes are substantive product updates; do not dismiss them as generic promotion merely because the post is brief.",
     "Do not assume an unknown product belongs to OpenAI or that its changes affect Codex.",
 ]
 
@@ -275,7 +294,9 @@ class Settings(BaseModel):
                 "name": "unknown",
                 "organization": "unknown",
                 "role": "unknown",
+                "official_handles": [],
                 "products_of_interest": [],
+                "product_aliases": [],
                 "notes": ["No account-specific background has been configured for this monitored handle."],
             }
         return self

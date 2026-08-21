@@ -27,6 +27,7 @@ The primary user follows an account that occasionally posts product, developer, 
 - Apply the configured minimum importance threshold outside the model response.
 - Use a selective verification pass for qualifying high-risk short relationship posts.
 - Include local preferences, author context, entity context, and learned tag affinity in the decision process.
+- Resolve configured product aliases and official organization handles so model updates can be recognized without requiring the words Codex or ChatGPT.
 
 ### Notification and Feedback
 

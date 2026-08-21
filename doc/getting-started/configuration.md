@@ -53,7 +53,7 @@ On a first run, the application has no cursor. Choose one of these values for `f
 
 - `interests`: topics and priorities that should be surfaced;
 - `ignore`: content that should usually be suppressed;
-- `author_context`: background for the monitored account;
+- `author_context`: background for the monitored account, including `product_aliases` such as Sol, Terra, and Luna and `official_handles` for organization accounts;
 - `entity_context`: organizations, aliases, products, and relationships that clarify related posts;
 - `interpretation_rules`: guidance for replies, reposts, ambiguity, and attribution.
 

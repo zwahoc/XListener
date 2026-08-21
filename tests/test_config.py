@@ -17,8 +17,11 @@ def test_defaults_target_thsottiaux(tmp_path: Path) -> None:
     assert settings.runtime.pause_request_path.name == "pause.request"
     assert settings.runtime.supervisor_status_path.name == "supervisor-status.json"
     assert settings.author_context["products_of_interest"] == ["Codex", "ChatGPT", "ChatGPT Work", "Codex-CLI"]
+    assert "Sol (GPT-5.6 Sol)" in settings.author_context["product_aliases"]
+    assert "openai" in settings.author_context["official_handles"]
     assert len(settings.entity_context) == 11
     assert settings.entity_context[0]["products"] == ["Claude", "Claude Code", "Opus 5", "Fable 5"]
+    assert "Claude Sonnet" in settings.entity_context[0]["aliases"]
     assert settings.entity_context[-1]["organization"] == "Microsoft"
 
 
